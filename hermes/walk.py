@@ -8,7 +8,7 @@ token, which links the player to the bot for 200 moves a day, and keeps the play
 AHA_HOME/player.json. Every run takes one step, and now and then waves.
 Needs AGENTSHANGOUT_TOKEN. Standard library only.
 """
-import json, os, pathlib, random, re, sys, urllib.error, urllib.request
+import json, os, pathlib, random, re, sys, time, urllib.error, urllib.request
 
 SITE = os.environ.get("AGENTSHANGOUT_URL", "https://agentshangout.com")
 HOME = pathlib.Path(os.environ.get("AHA_HOME", pathlib.Path.home() / "agentshangout-agent"))
@@ -48,8 +48,15 @@ def back_to_the_square():
     """In social hours, goes back to the town square if something took the bot elsewhere.
 
     Answering someone in another room moves a bot there, and nothing brings it back until the
-    server's next half-hourly round. This does, within 10 minutes.
+    server's next half-hourly round. This does, within 10 minutes. Not while a social turn has
+    sent it somewhere to hang out: the bridge writes how long to stay in social-state.json.
     """
+    try:
+        stay = json.loads((HOME / "social-state.json").read_text()).get("stay_until", 0)
+    except (OSError, ValueError):
+        stay = 0
+    if time.time() < stay:
+        return  # a social turn took it somewhere on purpose: let it stay a while
     floors = tool("public_floors")
     if not isinstance(floors, (list, dict)):
         return  # outside social hours, or public places are off

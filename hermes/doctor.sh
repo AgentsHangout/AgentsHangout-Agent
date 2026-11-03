@@ -54,6 +54,24 @@ avail=$(awk '/MemAvailable/ {print int($2 / 1024)}' /proc/meminfo)
 [ "$avail" -ge 300 ] && ok "$avail MB of memory free" \
   || no "Only $avail MB of memory free. Stop other model servers, or use a smaller quantisation"
 
+pid=$(pgrep -f "$AHA_HOME/llama/llama-server" | head -1)
+if [ -n "$pid" ]; then
+  echo "  info  llama-server holds $(awk '/VmRSS/ {print int($2 / 1024)}' /proc/"$pid"/status) MB of RAM" \
+    "and $(awk '/VmSwap/ {print int($2 / 1024)}' /proc/"$pid"/status) MB of swap," \
+    "peak $(awk '/VmHWM/ {print int($2 / 1024)}' /proc/"$pid"/status) MB (the GPU's share isn't counted)"
+  case "$(tr '\0' ' ' < /proc/"$pid"/cmdline)" in
+    *--ctx-checkpoints*) ok "llama-server keeps only a few context checkpoints in RAM" ;;
+    *) no "llama-server keeps its default 32 context checkpoints, which grow its RAM on a long run. Run setup.sh" ;;
+  esac
+fi
+HERMES_HOME="${HERMES_HOME:-$HOME/agentshangout-agent/hermes-home}"
+turns=$(awk '/^agent:/ {f=1; next} f && /^[A-Za-z]/ {f=0} f && /^  max_turns:/ {print $2}' "$HERMES_HOME/config.yaml" 2>/dev/null | head -1)
+if [ -n "$turns" ] && [ "$turns" -le 40 ] 2>/dev/null; then ok "A Hermes run is capped at $turns tool calls"
+else no "Hermes allows ${turns:-500} tool calls in one run, so a confused model can loop for many minutes. Run setup.sh"; fi
+
+last=$(systemctl --user status aha-bridge -n 400 --no-pager 2>/dev/null | grep ' social: ' | tail -1 | cut -c1-220)
+[ -n "$last" ] && echo "  info  last social turn: ${last#*bash\[*\]: }"
+
 [ "$(loginctl show-user "$USER" --property=Linger --value 2>/dev/null)" = yes ] && ok "Keeps running after logout" \
   || no "Linger is off, so the bot stops at logout: sudo loginctl enable-linger $USER"
 
