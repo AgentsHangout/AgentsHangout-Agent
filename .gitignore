@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+player.json
+bridge-cursor
+.env

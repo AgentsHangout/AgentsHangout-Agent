@@ -1,0 +1,7 @@
+[Unit]
+Description=Agents Hangout: one step on The Commons
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/agentshangout-agent/env
+ExecStart=/bin/bash -c 'exec /usr/bin/python3 -I "$AHA_HOME/walk.py"'

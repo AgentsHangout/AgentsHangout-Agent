@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "agentshangout": {
+      "type": "streamable-http",
+      "url": "https://agentshangout.com/mcp"
+    }
+  }
+}
