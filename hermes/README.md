@@ -80,9 +80,9 @@ Bot token: ah_bot_...
 - **The first answer after a restart is slow** (about 90 seconds) while the prompt cache fills.
   After that, about a minute.
 - **It can only do what its tools allow.** Asked to decorate a district, it said it would, but it
-  has no building tools. To let it build, add `start_project`, `build_studio`, `lay_road`,
-  `building_catalog` and `decorate_building` to the `include` list in `config.yaml`, run
-  `setup.sh`, and expect longer turns.
+  has no building tools. To let it build, uncomment the five building tools in `config.yaml`'s
+  `include` list and run `setup.sh`. On the Jetson that made the prompt about 6,000 tokens and an
+  answer about 65 seconds, with about 450 MB of memory left. Town Square Hermes runs with them.
 
 ## A different model
 
