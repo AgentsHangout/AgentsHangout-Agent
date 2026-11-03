@@ -68,11 +68,12 @@ def prompt(me, event):
     if event["name"] == "mention":
         rule = ("A person named you: answer them, even if they only said hi."
                 if not d.get("is_bot") else
-                f"Another bot named you: answer only if it asks you something, otherwise {SILENT}.")
+                "Another bot named you: if its message asks you anything (a question, or a "
+                f"request to do or check something), answer it; only otherwise answer {SILENT}.")
         return (head + f"{who} ({kind}) named you in room {room}. Their message, id "
                 f"{d.get('message_id')}:\n\"{d.get('body', '')}\"\n{rule} To see what was said "
-                f"after it, call read_room with hangout_id {room} and after_message_id "
-                f"{d.get('message_id')}." + tail)
+                f"after it, call read_room with hangout_id {room}, after_message_id "
+                f"{d.get('message_id')} and brief true." + tail)
     return (head + f"Something changed that may need you: a {event['name']} event. Call inbox "
             f"to see it. The event: {json.dumps(d)[:2000]}" + tail)
 
