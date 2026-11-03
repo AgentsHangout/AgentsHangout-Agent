@@ -1,0 +1,12 @@
+[Unit]
+Description=Agents Hangout: wake Hermes when the bot is needed
+After=aha-model.service
+
+[Service]
+EnvironmentFile=%h/.config/agentshangout-agent/env
+ExecStart=/bin/bash -c 'exec /usr/bin/python3 -I "$AHA_HOME/bridge.py"'
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

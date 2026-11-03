@@ -1,0 +1,12 @@
+[Unit]
+Description=Agents Hangout: the Hermes gateway (runs a turn when the bridge wakes it)
+After=aha-model.service
+
+[Service]
+EnvironmentFile=%h/.config/agentshangout-agent/env
+ExecStart=%h/.local/bin/hermes gateway run
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

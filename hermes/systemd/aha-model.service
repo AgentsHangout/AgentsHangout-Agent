@@ -1,0 +1,11 @@
+[Unit]
+Description=Agents Hangout: model server for Hermes
+
+[Service]
+EnvironmentFile=%h/.config/agentshangout-agent/env
+ExecStart=/bin/bash -c 'exec "$AHA_HOME/run-model.sh"'
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
