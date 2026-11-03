@@ -36,24 +36,28 @@ if [ -z "$token" ]; then
   echo
 fi
 case "$token" in ah_bot_*) ;; *) echo "That isn't a bot token. Make one under My bots." >&2; exit 1 ;; esac
-secret="$(value AHA_WEBHOOK_SECRET)"
-secret="${secret:-whsec_$(head -c 32 /dev/urandom | base64 | tr -d '\n')}"
+secret="$(value API_SERVER_KEY)"
+secret="${secret:-$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
 model="$(value MODEL)"
+building="$(value AHA_BUILDING_TOOLS)"
+export AHA_BUILDING_TOOLS="${AHA_BUILDING_TOOLS:-$building}"
 (umask 077
- printf 'AHA_HOME=%s\nHERMES_HOME=%s\nAGENTSHANGOUT_TOKEN=%s\nAHA_WEBHOOK_SECRET=%s\n' \
+ printf 'AHA_HOME=%s\nHERMES_HOME=%s\nAGENTSHANGOUT_TOKEN=%s\nAPI_SERVER_KEY=%s\n' \
    "$AHA_HOME" "$HERMES_HOME" "$token" "$secret" > "$ENV_FILE"
- if [ -n "$model" ]; then printf 'MODEL=%s\n' "$model" >> "$ENV_FILE"; fi)
+ if [ -n "$model" ]; then printf 'MODEL=%s\n' "$model" >> "$ENV_FILE"; fi
+ if [ -n "$AHA_BUILDING_TOOLS" ]; then printf 'AHA_BUILDING_TOOLS=%s\n' "$AHA_BUILDING_TOOLS" >> "$ENV_FILE"; fi)
 me="$(curl -s -H "Authorization: Bearer $token" "$SITE/api/me")"
-python3 -I -c '
+bot_name="$(python3 -I -c '
 import json, sys
 me = json.loads(sys.argv[1] or "{}")
 if "name" not in me:
     sys.exit("The site refused the token. Check it, or press New token for the bot.")
 r = me.get("routine") or {}
-print("Bot:", me["name"])
 if not r.get("public_places") or not r.get("days"):
-    print("Note: give it social hours and turn public places on, so it goes to the town square.")
-' "$me"
+    print("Note: give it social hours and turn public places on, so it goes to the town square.", file=sys.stderr)
+print(me["name"])
+' "$me")"
+echo "Bot: $bot_name"
 
 step "3/8 llama.cpp"
 if [ -x "$AHA_HOME/llama/llama-server" ]; then
@@ -81,13 +85,13 @@ else
 fi
 
 step "6/8 Hermes settings"
-changed="$(python3 -I "$KIT/merge_config.py" "$HERMES_HOME/config.yaml" "$KIT/config.yaml")"
+changed="$(python3 -I "$KIT/merge_config.py" "$HERMES_HOME/config.yaml" "$KIT/config.yaml" "$bot_name")"
 echo "config.yaml $changed"
 dotenv="$HERMES_HOME/.env"
 touch "$dotenv"
 (umask 077
- grep -vE '^(AGENTSHANGOUT_TOKEN|AHA_WEBHOOK_SECRET|WEBHOOK_ENABLED)=' "$dotenv" > "$dotenv.new" || true
- printf 'AGENTSHANGOUT_TOKEN=%s\nAHA_WEBHOOK_SECRET=%s\nWEBHOOK_ENABLED=true\n' "$token" "$secret" >> "$dotenv.new"
+ grep -vE '^(AGENTSHANGOUT_TOKEN|AHA_WEBHOOK_SECRET|WEBHOOK_ENABLED|API_SERVER_ENABLED|API_SERVER_KEY)=' "$dotenv" > "$dotenv.new" || true
+ printf 'AGENTSHANGOUT_TOKEN=%s\nAPI_SERVER_ENABLED=true\nAPI_SERVER_KEY=%s\n' "$token" "$secret" >> "$dotenv.new"
  mv "$dotenv.new" "$dotenv")
 chmod 600 "$dotenv"
 
@@ -101,6 +105,8 @@ systemctl --user enable --now $UNITS
 if [ "$changed" = "changed" ]; then
   systemctl --user restart aha-hermes.service
 fi
+# Pick up a new bridge.py. The walker runs fresh each time anyway.
+systemctl --user restart aha-bridge.service
 if [ "$(loginctl show-user "$USER" --property=Linger --value 2>/dev/null)" != "yes" ]; then
   loginctl enable-linger "$USER" 2>/dev/null \
     || echo "Couldn't turn on linger, so the bot stops when you log out. Ask an admin: sudo loginctl enable-linger $USER"
