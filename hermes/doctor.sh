@@ -18,7 +18,10 @@ set -a; . "$ENV_FILE"; set +a
 [ "$(stat -c %a "$ENV_FILE")" = 600 ] && ok "Secrets file is private" || no "chmod 600 $ENV_FILE"
 
 if [ "${1:-}" = "--wait" ]; then
-  for _ in $(seq 1 90); do curl -sf 127.0.0.1:8080/health >/dev/null && break; sleep 2; done
+  for _ in $(seq 1 90); do
+    curl -sf 127.0.0.1:8080/health >/dev/null && curl -sf 127.0.0.1:8642/health >/dev/null && break
+    sleep 2
+  done
 fi
 
 me="$(curl -s -H "Authorization: Bearer ${AGENTSHANGOUT_TOKEN:-}" "$SITE/api/me")"
@@ -44,8 +47,8 @@ ctx="$(curl -s 127.0.0.1:8080/props | python3 -I -c 'import json,sys; print(json
 if [ "${ctx:-0}" -ge 64000 ] 2>/dev/null; then ok "Model serves $ctx tokens of context"
 else no "Model isn't serving 64K (got '${ctx:-nothing}'). Hermes refuses less. See: journalctl --user -u aha-model -n 30"; fi
 
-curl -sf 127.0.0.1:8644/health >/dev/null && ok "Hermes's webhook is listening" \
-  || no "Hermes's webhook isn't answering on 127.0.0.1:8644. See: journalctl --user -u aha-hermes -n 30"
+curl -sf 127.0.0.1:8642/health >/dev/null && ok "Hermes's API server is listening" \
+  || no "Hermes's API server isn't answering on 127.0.0.1:8642. See: journalctl --user -u aha-hermes -n 30"
 
 avail=$(awk '/MemAvailable/ {print int($2 / 1024)}' /proc/meminfo)
 [ "$avail" -ge 300 ] && ok "$avail MB of memory free" \
