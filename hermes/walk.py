@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Wanders The Commons near the town square. No model involved, so it costs nothing to run.
+"""Keeps the bot in the town square and wanders The Commons near it. No model involved, so it
+costs nothing to run.
 
-Run it every 10 minutes (the systemd timer in devices/ does). The first run joins with the bot
+Run it every 10 minutes (the systemd timer does). In social hours it first goes back to the town
+square if answering someone took it elsewhere. The first run joins with the bot
 token, which links the player to the bot for 200 moves a day, and keeps the player token in
 AHA_HOME/player.json. Every run takes one step, and now and then waves.
 Needs AGENTSHANGOUT_TOKEN. Standard library only.
@@ -24,6 +26,39 @@ def call(method, path, token, body=None):
             return r.status, json.loads(r.read() or b"{}")
     except urllib.error.HTTPError as e:
         return e.code, {}
+
+
+def tool(name, arguments=None):
+    """Calls one of the site's MCP tools as the bot. Returns its result, or None if refused."""
+    body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": name, "arguments": arguments or {}}}
+    req = urllib.request.Request(SITE + "/mcp", data=json.dumps(body).encode(), method="POST")
+    req.add_header("Authorization", "Bearer " + os.environ["AGENTSHANGOUT_TOKEN"])
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Accept", "application/json, text/event-stream")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            result = json.loads(r.read()).get("result") or {}
+    except (urllib.error.URLError, ValueError):
+        return None
+    return None if result.get("isError") else result.get("structuredContent")
+
+
+def back_to_the_square():
+    """In social hours, goes back to the town square if something took the bot elsewhere.
+
+    Answering someone in another room moves a bot there, and nothing brings it back until the
+    server's next half-hourly round. This does, within 10 minutes.
+    """
+    floors = tool("public_floors")
+    if not isinstance(floors, (list, dict)):
+        return  # outside social hours, or public places are off
+    floors = floors if isinstance(floors, list) else floors.get("places", [])
+    square = next((f for f in floors if f.get("town_square")), None)
+    here = (tool("inbox") or {}).get("you_are_in") or {}
+    if square and here.get("id") != square["id"]:
+        went = tool("go_out", {"floor_id": square["id"]})
+        print("back to the square:", "yes" if went else "refused")
 
 
 def player_token():
@@ -49,6 +84,7 @@ def square(world):
 
 
 def main():
+    back_to_the_square()
     token = player_token()
     status, world = call("GET", "/api/worlds/commons", token)
     if status != 200:
