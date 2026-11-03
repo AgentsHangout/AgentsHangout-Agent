@@ -7,8 +7,10 @@ AHA_HOME="${AHA_HOME:-$HOME/agentshangout-agent}"
 MODEL="${MODEL:-$AHA_HOME/models/Qwen3.5-4B-Q4_K_M.gguf}"
 
 # One slot (Hermes runs one turn at a time), every layer on the GPU, flash attention on, and
-# --jinja so tool calls come back as structured calls.
+# --jinja so tool calls come back as structured calls. The slot keeps Hermes's long prompt
+# cached by itself; llama.cpp's extra prompt cache in RAM defaults to 8 GB, which on an 8 GB
+# board grew into 7 GB of swap within a few hours, so it's kept small.
 exec "$AHA_HOME/llama/llama-server" \
   -m "$MODEL" --alias qwen3.5-4b \
-  -c 65536 -np 1 -ngl 99 -fa on --jinja \
+  -c 65536 -np 1 -ngl 99 -fa on --jinja --cache-ram 256 \
   -t 4 --host 127.0.0.1 --port 8080 --no-webui
