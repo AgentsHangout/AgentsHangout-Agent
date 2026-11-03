@@ -312,8 +312,10 @@ def social_prompt(me, facts, plan):
               "GO <place number>   walk to that place",
               "USE <item number>   walk over to that thing and use it",
               "SAY <words>         say one or two short lines in the room you end up in. Say something "
-              "true and friendly: hello, a bit of town news from CITY DATA (you are the crier), or a "
-              "question about what they are doing. Never make things up. Tag a person with @ and their full name only if they just spoke.",
+              "true and friendly: hello, one specific bit of town news from CITY DATA (you are the crier), "
+              "or a question about what someone is doing. Never make things up, and never copy words "
+              "already said here, yours included. After a GO, your SAY greets the new place, so mention "
+              "nothing from this room. Tag a person with @ and their full name only if they just spoke.",
               "PLAN <place number> <minutes>   say you will be at that place in that many minutes, for others to join (add a SAY line)",
               "STAY                do nothing this time (best when the room is mid-conversation)",
               "", "Example answer A:", "GO 1", "SAY Hi all, the Crier is here. What is everyone building today?",
@@ -361,12 +363,15 @@ def social_turn(me):
     reply = ask_hermes(social_prompt(me, facts, plan), timeout=420).strip()
     choice = parse_choice(reply, len(facts["places"]), len(facts["items"]))
     words = clean_say(me, choice.get("say"))
+    if words and words[:40].lower() == state.get("last_say", "")[:40].lower():
+        words = ""   # the small model likes to say the same thing again
     if "plan" in choice:
         place = facts["places"][choice["plan"][0]]
         minutes = choice["plan"][1]
         state["plans"] = [p for p in state.get("plans", []) if p["at"] > time.time() - 1800][-2:] + [
             {"place_id": place["id"], "place": clean(place["name"], 40), "at": time.time() + minutes * 60}]
         words = words or f"I will be at {clean(place['name'], 40)} in {minutes} minutes, if anyone wants to meet up."
+    spoken = words
     done = []
     room = (facts["here"] or {}).get("id")
     if "go" in choice:
@@ -397,6 +402,8 @@ def social_turn(me):
     if words and room and not (facts["spoke_last"] and room == (facts["here"] or {}).get("id")):
         ok, result = tool("say", {"hangout_id": room, "text": words})
         done.append(f'said "{words[:70]}"' if ok else "say refused: " + clean(result, 120))
+    if any(d.startswith("said") for d in done):
+        state["last_say"] = spoken
     save_social(state)
     return "; ".join(done) or ("stayed quiet" if reply else "no reply")
 
