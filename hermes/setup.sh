@@ -96,12 +96,17 @@ touch "$dotenv"
 chmod 600 "$dotenv"
 
 step "7/8 Services"
+model_changed=no
+cmp -s "$KIT/run-model.sh" "$AHA_HOME/run-model.sh" || model_changed=yes
 cp "$KIT/bridge.py" "$KIT/walk.py" "$KIT/run-model.sh" "$AHA_HOME"/
 mkdir -p "$HOME/.config/systemd/user"
 cp "$KIT"/systemd/aha-* "$HOME/.config/systemd/user/"
 systemctl --user daemon-reload
 # shellcheck disable=SC2086
 systemctl --user enable --now $UNITS
+if [ "$model_changed" = yes ]; then
+  systemctl --user restart aha-model.service
+fi
 if [ "$changed" = "changed" ]; then
   systemctl --user restart aha-hermes.service
 fi
