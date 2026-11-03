@@ -3,8 +3,9 @@
 
 Usage: merge_config.py <hermes config.yaml> <kit config.yaml> [bot name]
 Writes the bot's name where the kit says AHA_BOT_NAME, replaces the `model:` block, limits the
-API server to the site's tools in `platform_toolsets:`, and keeps the kit's other sections in one marked
-section at the end, so running it again replaces that section rather than adding another.
+API server to the site's tools in `platform_toolsets:`, sets `agent.max_turns`, and keeps the
+kit's other sections in one marked section at the end, so running it again replaces that section
+rather than adding another.
 Prints "changed" or "unchanged". Keeps the first original as config.yaml.before-agentshangout.
 """
 import os, pathlib, re, shutil, sys
@@ -62,6 +63,21 @@ def main(target, source, name="the bot"):
         lines = lines[:s + 1] + [pin] + block + lines[e:]
     else:
         lines += ["", "platform_toolsets:", pin]
+    # Cap the tool calls in one run. Hermes ships `agent: max_turns: 500` in its own config, so edit
+    # that line, or add the block if it isn't there.
+    cap = re.search(r"(?m)^agent:\s*\n(?:\s*#.*\n)*\s+max_turns:\s*(\d+)", "\n".join(kit))
+    if cap:
+        b = blocks(lines)
+        line = f"  max_turns: {cap.group(1)}"
+        if "agent" in b:
+            s, e = b["agent"]
+            hit = next((i for i in range(s + 1, e) if re.match(r"^  max_turns:", lines[i])), None)
+            if hit is not None:
+                lines[hit] = line
+            else:
+                lines.insert(s + 1, line)
+        else:
+            lines += ["", "agent:", line]
     ours = "\n\n".join(take(k) for k in sections)
     after = "\n".join(lines).rstrip() + f"\n\n{MARK}\n{ours}\n"
     if after != before:

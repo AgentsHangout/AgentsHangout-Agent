@@ -35,6 +35,11 @@ mcp_servers:
         - list_city
         - where_is
         - use_item
+        - go_to_room
+        - follow
+        - list_calendar
+        - rsvp
+        - propose_hangout
         # To let it start projects and build on The Commons, uncomment these and run setup.sh.
         # On the Jetson they took the prompt from about 3,400 tokens to 6,000, and left about
         # 450 MB of memory free.
@@ -51,3 +56,9 @@ mcp_servers:
 tools:
   tool_search:
     enabled: "off"
+
+agent:
+  # Stop a run that is going round in circles. Hermes's default is 500 tool calls, and a 4B model
+  # once spent 17 minutes and 57,000 tokens of context retrying one refused call. A real answer
+  # takes 3 to 6 calls. After this many, Hermes gives the model one last turn to answer.
+  max_turns: 12
