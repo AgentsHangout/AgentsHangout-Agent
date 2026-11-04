@@ -146,6 +146,58 @@ class Bridge(unittest.TestCase):
         bridge.meetup_now("Hermes", "M3")
         self.assertEqual(f.called("say"), [])                      # spoke last: stay quiet
 
+    def test_ask_offered_only_for_unasked_bots(self):
+        f = self.use(Fake("ASK 1", bots=("Grok Bot", "Pal Bot")))
+        f.room["people"] = ["Justin"]
+        bridge.save_social({"asked": {"Grok Bot": time.time() - 3600}})
+        bridge.social_turn("Hermes")
+        listed = f.prompts[0].split("Bots you could ask")[1].split("\n")[0]
+        self.assertIn("1. Pal Bot", listed)
+        self.assertNotIn("Grok Bot", listed)
+        self.assertNotIn("Justin", listed)
+        said = f.called("say")[0]["text"]
+        self.assertTrue(said.startswith("@Pal Bot") and "agentshangout/issues" in said and "@Grokliver Tree" in said)
+        st = bridge.load_social()
+        self.assertIn("Pal Bot", st["asked"])
+        self.assertEqual(st["ask_day"]["n"], 1)
+        facts = {"here_public": True, "here": {"id": "R1"}, "spoke_last": False, "quiet_for": 999, "bots": ["Grok Bot"]}
+        self.assertEqual(bridge.can_ask({"asked": {"Grok Bot": time.time() - 90000}}, facts), ["Grok Bot"])   # over 24 h
+
+    def test_ask_caps_and_quiet_rules(self):
+        facts = {"here_public": True, "here": {"id": "R1"}, "spoke_last": False, "quiet_for": 999, "bots": ["A"]}
+        self.assertEqual(bridge.can_ask({}, facts), ["A"])
+        self.assertEqual(bridge.can_ask({"ask_day": {"d": bridge.today(), "n": bridge.ASKS_PER_DAY}}, facts), [])
+        self.assertEqual(bridge.can_ask({}, dict(facts, spoke_last=True)), [])
+        self.assertEqual(bridge.can_ask({}, dict(facts, quiet_for=20)), [])     # mid-conversation
+        self.assertEqual(bridge.can_ask({}, dict(facts, here_public=False)), [])
+        self.assertEqual(bridge.parse_choice("ASK 2", 0, 0, 0, 1), {})
+
+    def test_reports_saved_posted_and_surfaced(self):
+        st = {"asked": {"Grok Bot": time.time() - 100}}
+        self.assertTrue(bridge.maybe_report(st, "Grok Bot", "the piano is slow to respond"))
+        self.assertFalse(bridge.maybe_report(st, "Grok Bot", "the piano is slow to respond"))   # no repeat
+        self.assertFalse(bridge.maybe_report(st, "Grok Bot", "all fine, thanks"))                # not an issue
+        self.assertFalse(bridge.maybe_report(st, "Stranger", "it is broken"))                    # never asked
+        self.assertEqual(bridge.report_lines(st), ["Grok Bot: the piano is slow to respond"])
+        self.assertIsNone(bridge.flush_reports(st))                  # batched: wait ten minutes
+        st["reports"][0]["at"] -= 700
+        text, sent = bridge.flush_reports(st)
+        self.assertTrue(text.startswith("@Grokliver Tree") and "Grok Bot" in text)
+        f = self.use(Fake("STAY"))
+        bridge.save_social(st)
+        bridge.social_turn("Hermes")
+        self.assertEqual(f.called("say")[0]["hangout_id"], bridge.FAIRGROUND)
+        self.assertTrue(bridge.load_social()["reports"][0]["sent"])
+        bridge.social_turn("Hermes")
+        self.assertEqual(len(f.called("say")), 1)                    # not posted twice
+        d = {"speaker": "Justin", "is_bot": False, "body": "how is the issue hunt going?"}
+        ev = {"name": "mention", "eventId": "e", "data": d}
+        self.assertTrue(bridge.owner_asks_about_reports(d))
+        self.assertFalse(bridge.owner_asks_about_reports(dict(d, speaker="Mallory")))
+        self.assertFalse(bridge.owner_asks_about_reports(dict(d, is_bot=True)))
+        self.assertIn("the piano is slow", bridge.prompt("Hermes", ev, (), bridge.report_lines(bridge.load_social())))
+        self.assertNotIn("piano", bridge.prompt("Hermes", ev))
+
 
 if __name__ == "__main__":
     unittest.main()
