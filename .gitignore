@@ -3,3 +3,5 @@ __pycache__/
 player.json
 bridge-cursor
 .env
+dist/
+*.zip
