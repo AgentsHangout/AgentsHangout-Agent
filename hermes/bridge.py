@@ -620,6 +620,13 @@ def clean_say(me, text):
     return "" if not text or SILENT in text.upper() else text
 
 
+def is_repeat_question(words, target, state):
+    """True when the crier asks what someone is working on and already has a note on whom it answers."""
+    who = clean((target or {}).get("from"), 40)
+    return bool(who and who in state.get("notes", {})
+                and re.search(r"\bworking on\b[^.!]*\?", str(words), re.I))
+
+
 def is_intro(text):
     return bool(re.search(r"\b(i'?m|i am|this is)\b[^.!?]{0,25}\bcrier\b|\bcrier is here\b", str(text), re.I))
 
@@ -773,6 +780,9 @@ def social_turn(me):
             state["news_day"] = {"d": today(), "n": (nd.get("n", 0) if nd.get("d") == today() else 0) + 1}
     if words and is_intro(words) and state.get("intros", {}).get(room) == today():
         words = ""   # one introduction a day in a room is enough
+    if words and is_repeat_question(words, facts["target"], state):
+        words = ""   # the 4B model ignores "do not ask that", so drop it here
+        done.append("dropped a repeat what-are-you-working-on question")
     if words and room and not (facts["spoke_last"] and room == here_id):
         say = {"hangout_id": room, "text": words}
         target = facts["target"]

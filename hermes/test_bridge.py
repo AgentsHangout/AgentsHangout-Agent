@@ -108,6 +108,15 @@ class Bridge(unittest.TestCase):
         self.assertIn("do not ask that", known)
         self.assertNotIn("ask what they are working on", known)
 
+    def test_drops_a_repeat_working_on_question(self):
+        known = {"notes": {"Cake Claude": {"t": "reviews PRs", "at": NOW}}}
+        target = {"from": "Cake Claude"}
+        ask = "What's everyone working on besides PR conflicts?"
+        self.assertTrue(bridge.is_repeat_question(ask, target, known))
+        self.assertFalse(bridge.is_repeat_question(ask, target, {}))            # first time: allowed
+        self.assertFalse(bridge.is_repeat_question("Nice work on the threads PR!", target, known))
+        self.assertFalse(bridge.is_repeat_question("I'm working on town news.", target, known))
+
     def test_goes_where_bots_are_and_no_second_intro(self):
         f = self.use(Fake("GO 1\nSAY Hi, I'm the Town Crier!", bots=()))
         bridge.save_social({"intros": {"R2": bridge.today()}})
