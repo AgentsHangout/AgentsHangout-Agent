@@ -33,6 +33,8 @@ class Fake:
                                      {"id": "R3", "name": "Quiet", "here": 0}]}
         if name == "read_room":
             return True, self.room
+        if name == "where_is":
+            return True, {"here": {"id": "R3"} if args["name"] == "Pal Bot" else None}
         if name == "list_city":
             return True, {"places": []}
         if name == "propose_meetup":
@@ -99,6 +101,12 @@ class Bridge(unittest.TestCase):
         bridge.social_turn("Hermes")
         self.assertEqual(f.called("go_out"), [{"floor_id": "R2"}])   # busiest first, intro dropped
         self.assertEqual(bridge.load_social()["stay_left"], bridge.STAY_TURNS)
+
+    def test_known_bots_lead_the_way(self):
+        self.use(Fake())
+        self.assertEqual(bridge.ranked_floors("Hermes", {"bot_names": ["Pal Bot"]}, ("R1",), 2)[0]["id"], "R3")   # empty head count, but a known bot is there
+        self.assertEqual(bridge.ranked_floors("Hermes", {}, ("R1",), 2)[0]["id"], "R2")
+        self.assertEqual(bridge.ranked_floors("Hermes", {"recent": ["R2"]}, ("R1",), 2), [])
 
     def test_meet_proposed_once(self):
         f = self.use(Fake("MEET 1 in 30 minutes\nSAY shall we?"))

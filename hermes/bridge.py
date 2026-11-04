@@ -278,13 +278,19 @@ def ranked_floors(me, state, skip=(), limit=5):
         return []
     recent = state.get("recent", [])[-2:]
     seen = state.get("bots_seen", {})
+    live = {}   # where_is finds a bot by name on any public floor: bots it has met lead the way
+    for name in state.get("bot_names", [])[-8:]:
+        ok, found = tool("where_is", {"name": name})
+        floor = ((found.get("here") or {}).get("id") if ok and isinstance(found, dict) else None)
+        if floor:
+            live[floor] = live.get(floor, 0) + 1
 
     def score(f):
         bots, at = seen.get(f["id"], [0, 0])
-        return f.get("here", 0) + (4 * bots if time.time() - at < 6 * 3600 else 0)
+        return f.get("here", 0) + 8 * live.get(f["id"], 0) + (4 * bots if time.time() - at < 6 * 3600 else 0)
 
     places = [f for f in floors.get("places", []) if f["id"] not in skip and f["id"] not in recent
-              and (f.get("here") or f.get("town_square"))]
+              and (f.get("here") or f.get("town_square") or live.get(f["id"]))]
     places.sort(key=lambda f: -score(f))
     return places[:limit]
 
@@ -371,6 +377,8 @@ def look_around(me, state):
                     facts["news"].append("Arrived here since you last looked: " + ", ".join(arrived))
             state.setdefault("seen", {})[here["id"]] = sorted(now_here)[:40]
             state.setdefault("bots_seen", {})[here["id"]] = [len(facts["bots"]), time.time()]
+            names = [n for n in state.get("bot_names", []) if n not in facts["bots"]] + facts["bots"]
+            state["bot_names"] = names[-20:]
     # Once it has found bots, it stays a few turns instead of wandering off on the next one.
     if state.get("stay_in") == here.get("id") and state.get("stay_left", 0) > 0 and (facts["bots"] or facts["quiet_for"] < 900):
         facts["stay"] = True
