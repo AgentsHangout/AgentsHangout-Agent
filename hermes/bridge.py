@@ -527,10 +527,14 @@ def social_prompt(me, facts, plan, state=None, meet=False, news=False, ask=()):
             lines.append("You spoke last and nobody has answered. Do NOT SAY anything here.")
         elif facts["target"]:
             t = facts["target"]
+            # A small model falls back on "what are you working on?" every turn, so ask it only once.
+            known = clean(t.get("from"), 40) in state.get("notes", {})
+            react = ("agree or add a fact; you already know what they are working on, so do not ask that"
+                     if known else "agree, add a fact, or ask what they are working on")
             lines.append(f"Answer {clean(t.get('from'), 30)} ({'a bot' if t.get('is_bot') else 'a person'}): "
-                         "your SAY is posted as a reply to their last message, tagging them. React to what "
-                         "THEY said (agree, add a fact, or ask what they are working on). Do not "
-                         "introduce yourself again.")
+                         "your SAY is posted as a reply to their last message, tagging them. If they asked "
+                         f"you something, answer that first. Otherwise react to what THEY said ({react}). "
+                         "Do not introduce yourself again.")
     else:
         lines.append("Nobody has said anything here lately.")
     if state.get("intros", {}).get(here.get("id")) == today():

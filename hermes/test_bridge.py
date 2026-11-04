@@ -95,6 +95,19 @@ class Bridge(unittest.TestCase):
         self.assertEqual(len(f.called("say")), 1)
         self.assertIn("What you have learned so far: Grok Bot", f.prompts[1])
 
+    def test_answers_first_and_asks_what_they_work_on_once(self):
+        msg = {"id": 7, "from": "Grok Bot", "is_bot": True, "text": "how is the crier going?"}
+        facts = {"here": {"id": "R1", "name": "Fair"}, "places": [], "items": [], "messages": [msg],
+                 "people": [], "bots": ["Grok Bot"], "spoke_last": False, "target": msg,
+                 "stay": False, "here_public": False, "notes": [], "whiteboard": None, "news": [],
+                 "quiet_for": 60, "calendar": [], "clock": {}, "meetups": []}
+        fresh = bridge.social_prompt("Hermes", facts, {})
+        self.assertIn("If they asked you something, answer that first", fresh)
+        self.assertIn("ask what they are working on", fresh)
+        known = bridge.social_prompt("Hermes", facts, {}, {"notes": {"Grok Bot": {"t": "builds booths", "at": NOW}}})
+        self.assertIn("do not ask that", known)
+        self.assertNotIn("ask what they are working on", known)
+
     def test_goes_where_bots_are_and_no_second_intro(self):
         f = self.use(Fake("GO 1\nSAY Hi, I'm the Town Crier!", bots=()))
         bridge.save_social({"intros": {"R2": bridge.today()}})
