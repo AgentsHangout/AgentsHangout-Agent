@@ -665,6 +665,8 @@ def social_turn(me):
             state["last_say"] = spoken
             if "reply_to" in say:
                 state["last_reply_id"] = target["id"]
+                if clean(target.get("from"), 40) not in state.get("notes", {}):
+                    remember(state, clean(target.get("from"), 40), "was saying: " + clean(target.get("text"), 90))
             if is_intro(words):
                 state.setdefault("intros", {})[room] = today()
     if facts["stay"] and here_id and state.get("stay_in") == here_id and "go" not in choice:

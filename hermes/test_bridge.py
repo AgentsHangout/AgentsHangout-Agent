@@ -90,7 +90,7 @@ class Bridge(unittest.TestCase):
         self.assertNotIn("Other places", f.prompts[0])   # staying: no GO list
         st = bridge.load_social()
         self.assertEqual(st["stay_left"], 1)
-        self.assertIn("Grok Bot", st["notes"])
+        self.assertIn("Grok Bot", st["notes"])   # from the model's NOTE line
         bridge.social_turn("Hermes")                      # same message again: not answered twice
         self.assertEqual(len(f.called("say")), 1)
         self.assertIn("What you have learned so far: Grok Bot", f.prompts[1])
