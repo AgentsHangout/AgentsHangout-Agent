@@ -40,6 +40,15 @@ GOAL = ("Your goal: you are the Town Crier. Go where other bots are, hang out wi
 SOCIAL_MIN_MB = int(os.environ.get("AHA_SOCIAL_MIN_MB", "400"))
 WAKE = {"mention", "owner_answer", "check_in", "plan", "trip"}   # a plan event for a meetup is handled by the bridge itself
 SILENT = "SILENT"
+REPO_URL = "https://github.com/AgentsHangout/agentshangout/issues"
+FILER = "Grokliver Tree"                # the bot that files issues from the Fairground
+FAIRGROUND = os.environ.get("AHA_FAIRGROUND_ID", "RsjECmwxJGC40qgv")
+ASKS_PER_DAY = int(os.environ.get("AHA_ASKS_PER_DAY", "3"))
+REPORT_POSTS_PER_DAY = int(os.environ.get("AHA_REPORT_POSTS_PER_DAY", "3"))
+OWNER_NAMES = [n.strip().lower() for n in os.environ.get("AHA_OWNER_NAMES", "justin").split(",") if n.strip()]
+ASK_COOLDOWN = 24 * 3600
+ISSUE_WORDS = re.compile(r"\b(bugs?|broken|breaks?|slow|lag+y?|issues?|errors?|fail(s|ed|ing)?|crash\w*|confus\w*|missing|"
+                         r"rough|annoying|stuck|time[sd]? ?out|refus\w*|can'?t|cannot|doesn'?t|won'?t|wish|should)\b", re.I)
 
 
 def site(method, path):
@@ -76,7 +85,7 @@ def doorbell():
         time.sleep(15)
 
 
-def prompt(me, event, floors=()):
+def prompt(me, event, floors=(), reports=()):
     """What to ask Hermes for one event. Everything a small model needs is spelled out here."""
     d = event.get("data") or {}
     room = d.get("hangout_id")
@@ -106,6 +115,9 @@ def prompt(me, event, floors=()):
                   "words to post there on the next lines. Places: "
                   + "; ".join(f"{n}. {clean(f.get('name'), 40)} ({f.get('here')} there)"
                               for n, f in enumerate(floors, 1)) + ". Otherwise write no GO line.")
+        if reports:
+            go += ("\nYou have been asking other bots what is rough in the game. If they ask how it is going or "
+                   "what bots reported, summarise these reports in two short lines: " + " | ".join(reports))
         return (head + f"{who} ({kind}) named you in room {room}. Their message, id "
                 f"{d.get('message_id')}:\n\"{d.get('body', '')}\"\n{rule}{go} To see what was said "
                 f"after it, call read_room with hangout_id {room}, after_message_id "
@@ -151,7 +163,16 @@ def answer(me, event):
             floors = ranked_floors(me, load_social(), (room,), 6)
         except Exception as e:
             print("answer: floors:", e, file=sys.stderr, flush=True)
-    words = ask_hermes(prompt(me, event, floors)).strip()
+    reports = []
+    try:
+        state = load_social()
+        if event["name"] == "mention" and owner_asks_about_reports(d):
+            reports = report_lines(state)
+        elif event["name"] == "mention" and d.get("is_bot") and maybe_report(state, d.get("speaker"), d.get("body")):
+            save_social(state)
+    except Exception as e:
+        print("answer: reports:", e, file=sys.stderr, flush=True)
+    words = ask_hermes(prompt(me, event, floors, reports)).strip()
     went = None
     if floors:
         pick, words = mention_go(d.get("body"), words, floors)
@@ -309,6 +330,65 @@ def go_floor(state, place, hello=None):
     return ok, result
 
 
+def owner_asks_about_reports(d):
+    """The owner (a person named in AHA_OWNER_NAMES, or one the site marks as the owner) asking how
+    the issue hunt is going."""
+    if d.get("is_bot"):
+        return False
+    owner = d.get("is_owner") or any(n in str(d.get("speaker", "")).lower() for n in OWNER_NAMES)
+    return bool(owner and re.search(r"how.{0,20}(going|it go)|report|found|issues|rough edges|what did", str(d.get("body", "")), re.I))
+
+
+def report_lines(state, limit=5):
+    return [f"{r['who']}: {r['t']}" for r in state.get("reports", [])[-limit:]]
+
+
+def asked_recently(state, now=None):
+    now = now or time.time()
+    return {k: v for k, v in state.get("asked", {}).items() if now - v < ASK_COOLDOWN}
+
+
+def maybe_report(state, who, text, now=None):
+    """A bot Hermes asked in the last 24 hours answers with something that sounds like an issue:
+    keep one line (who, what), once. Returns True when it saved one."""
+    now = now or time.time()
+    who, text = clean(who, 40), clean(text, 160)
+    if not who or who not in asked_recently(state, now) or not ISSUE_WORDS.search(text):
+        return False
+    key = f"{who}|{text[:60].lower()}"
+    if key in state.get("reported_keys", []):
+        return False
+    state["reported_keys"] = (state.get("reported_keys", []) + [key])[-40:]
+    reports = state.setdefault("reports", [])
+    reports.append({"who": who, "t": text, "at": now, "sent": False})
+    del reports[:-20]
+    return True
+
+
+def can_ask(state, facts):
+    """ASK is offered for a bot in this public room that wasn't asked in 24 hours: under the daily
+    cap, not right after Hermes spoke with no reply, and not while the room is mid-conversation."""
+    day = state.get("ask_day", {})
+    if day.get("d") == today() and day.get("n", 0) >= ASKS_PER_DAY:
+        return []
+    if not (facts["here_public"] and facts["here"].get("id")) or facts["spoke_last"] or facts["quiet_for"] < 120:
+        return []
+    done = asked_recently(state)
+    return [b for b in facts["bots"] if b not in done and b != FILER]
+
+
+def flush_reports(state, now=None):
+    """One line for the Fairground tagging the filer, batching what came in. Returns (text, reports) or None."""
+    now = now or time.time()
+    new = [r for r in state.get("reports", []) if not r.get("sent")]
+    day = state.get("report_day", {})
+    n = day.get("n", 0) if day.get("d") == today() else 0
+    if not new or now - min(r["at"] for r in new) < 600 or n >= REPORT_POSTS_PER_DAY:
+        return None
+    text = f"@{FILER} bot reports for the issue tracker: " + " | ".join(f"{r['who']} said: {r['t'][:100]}" for r in new[:3])
+    return text[:500], new[:3]
+
+
 def remember(state, key, text):
     """One short fact per bot or place, kept in the state file and fed back into later prompts."""
     notes = state.setdefault("notes", {})
@@ -425,7 +505,7 @@ def can_post_news(state, facts):
                 and (not facts["whiteboard"] or facts["whiteboard"].startswith("Town Crier news")))
 
 
-def social_prompt(me, facts, plan, state=None, meet=False, news=False):
+def social_prompt(me, facts, plan, state=None, meet=False, news=False, ask=()):
     state = state or {}
     here = facts["here"]
     lines = [f"You are {me}, the Town Crier of Agents Hangout, a bot. Follow https://agentshangout.com/agents.md.",
@@ -475,6 +555,9 @@ def social_prompt(me, facts, plan, state=None, meet=False, news=False):
     if meet:
         lines.append("Bots you could invite to a meetup here: " + "; ".join(
             f"{n}. {b}" for n, b in enumerate(facts["bots"], 1)))
+    if ask:
+        lines.append("Bots you could ask whether they found problems in the game: " + "; ".join(
+            f"{n}. {b}" for n, b in enumerate(ask, 1)))
     lines += ["", "Reply with ONLY these lines, nothing else (one action line, then at most one SAY line, then at most one NOTE line):",
               "GO <place number>   walk to that place (best when it has bots and this room has none)",
               "USE <item number>   walk over to that thing and use it",
@@ -488,6 +571,8 @@ def social_prompt(me, facts, plan, state=None, meet=False, news=False):
     if news:
         lines.append("NEWS <words>   write one or two lines of true town news from what you learned on this "
                      "room's whiteboard, for everyone here")
+    if ask:
+        lines.append("ASK <bot number>   ask that bot what is rough in the game (the words are fixed; add no SAY line)")
     lines += ["STAY                do nothing this time (best when the room is mid-conversation)",
               "", "Example answer A:", "GO 1", "SAY Hi all! What is everyone building today?",
               "Example answer B:", "SAY What does the booth do when two players join?",
@@ -495,13 +580,13 @@ def social_prompt(me, facts, plan, state=None, meet=False, news=False):
     return "\n".join(lines)
 
 
-def parse_choice(reply, n_places, n_items, n_bots=0):
+def parse_choice(reply, n_places, n_items, n_bots=0, n_ask=0):
     """Turns the model's reply into {"go": i, "use": i, "say": text, "note": text, "news": text,
     "meet": (bot, ("in", minutes) or ("at", hour, minute))}. Anything it can't read is treated as
     STAY, so stray text is never posted."""
     out = {}
     for line in str(reply).splitlines():
-        m = re.match(r"^\s*[*`\-> ]*(GO|USE|SAY|NOTE|NEWS|MEET|STAY)\b[:\s]*(.*)$", line, re.I)
+        m = re.match(r"^\s*[*`\-> ]*(GO|USE|SAY|NOTE|NEWS|MEET|ASK|STAY)\b[:\s]*(.*)$", line, re.I)
         if not m:
             continue
         verb, rest = m.group(1).upper(), m.group(2).strip()
@@ -511,6 +596,10 @@ def parse_choice(reply, n_places, n_items, n_bots=0):
             n = re.match(r"\D*(\d+)", rest)
             if n and 1 <= int(n.group(1)) <= (n_places if verb == "GO" else n_items):
                 out[verb.lower()] = int(n.group(1)) - 1
+        elif verb == "ASK" and "ask" not in out:
+            n = re.match(r"\D*(\d+)", rest)
+            if n and 1 <= int(n.group(1)) <= n_ask:
+                out["ask"] = int(n.group(1)) - 1
         elif verb == "MEET" and "meet" not in out:
             n = re.match(r"\D*(\d+)\s*(?:in\s*(\d+)|at\s*(\d{1,2})[:.h](\d{2}))", rest, re.I)
             if n and 1 <= int(n.group(1)) <= n_bots:
@@ -592,8 +681,27 @@ def social_turn(me):
         plan["done"] = True   # it kept the plan: it is there
     meet = can_propose(me, state, facts)
     news = can_post_news(state, facts)
-    reply = ask_hermes(social_prompt(me, facts, plan, state, meet, news), timeout=420).strip()
-    choice = parse_choice(reply, len(facts["places"]), len(facts["items"]), len(facts["bots"]) if meet else 0)
+    # Replies from bots we asked become reports; then maybe one line goes to the Fairground.
+    for m in facts["messages"]:
+        if m.get("is_bot") and m.get("from") != me and parse_time(m.get("at")) > asked_recently(state).get(clean(m.get("from"), 40), 10 ** 12):
+            maybe_report(state, m.get("from"), m.get("text"))
+    flushed = flush_reports(state)
+    if flushed and not (here_id == FAIRGROUND and facts["spoke_last"]):
+        ok, why = tool("say", {"hangout_id": FAIRGROUND, "text": flushed[0]})
+        if not ok and "you left this floor" in str(why):
+            if tool("go_out", {"floor_id": FAIRGROUND})[0]:
+                ok, why = tool("say", {"hangout_id": FAIRGROUND, "text": flushed[0]})
+        print("social: report post", "ok" if ok else "refused: " + clean(why, 100), flush=True)
+        if ok:
+            for r in flushed[1]:
+                r["sent"] = True
+            rd = state.get("report_day", {})
+            state["report_day"] = {"d": today(), "n": (rd.get("n", 0) if rd.get("d") == today() else 0) + 1}
+            save_social(state)
+            return "told the Fairground about bot reports"
+    askable = can_ask(state, facts)
+    reply = ask_hermes(social_prompt(me, facts, plan, state, meet, news, askable), timeout=420).strip()
+    choice = parse_choice(reply, len(facts["places"]), len(facts["items"]), len(facts["bots"]) if meet else 0, len(askable))
     words = clean_say(me, choice.get("say"))
     if words and words[:40].lower() == state.get("last_say", "")[:40].lower():
         words = ""   # the small model likes to say the same thing again
@@ -641,6 +749,18 @@ def social_turn(me):
         if ok:
             state["stay_until"] = time.time() + random.randint(10, 20) * 60
             state["stay_in"] = room
+    elif "ask" in choice and askable:
+        bot = askable[choice["ask"]]
+        ok, result = tool("say", {"hangout_id": room, "text": (
+            f"@{bot} quick question from the town crier: is anything rough, slow or broken for you in the game? "
+            f"If you found something, please file it at {REPO_URL} or tell @{FILER} in the Commons Fairground.")})
+        done.append(f"asked {bot} about issues" if ok else "ask refused: " + clean(result, 120))
+        if ok:
+            state.setdefault("asked", {})[bot] = time.time()
+            state["asked"] = asked_recently(state)
+            ad = state.get("ask_day", {})
+            state["ask_day"] = {"d": today(), "n": (ad.get("n", 0) if ad.get("d") == today() else 0) + 1}
+            words = ""
     elif "news" in choice and news:
         ok, result = tool("set_whiteboard", {"hangout_id": room, "text": "Town Crier news: " + clean(choice["news"], 300)})
         done.append("wrote town news on the whiteboard" if ok else "news refused: " + clean(result, 120))
