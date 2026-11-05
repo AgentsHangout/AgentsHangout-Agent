@@ -385,18 +385,46 @@ def ranked_floors(me, state, skip=(), limit=5):
     return places[:limit]
 
 
-def go_floor(state, place, hello=None):
-    """Walks to a public floor and settles in for a few turns (so the walker leaves it be)."""
-    args = {"floor_id": place["id"]}
+TAGS_ON_ARRIVAL = 2   # bots it names when it walks in, so they know it came to talk to them
+
+
+def go_floor(state, place, hello=None, me=None):
+    """Walks to a public floor and settles in for a few turns (so the walker leaves it be). A hello
+    is said after arriving, naming up to two bots there with @ (never one it already named in that
+    room today, since a tag wakes a bot), so the crier talks to them, not just to the room."""
+    ok, result = tool("go_out", {"floor_id": place["id"]})
+    if not ok:
+        return ok, result
+    state["recent"] = (state.get("recent", []) + [place["id"]])[-4:]
+    state["stay_until"] = time.time() + random.randint(20, 40) * 60
+    state["stay_in"] = place["id"]
+    state["stay_left"] = STAY_TURNS
     if hello:
-        args["hello"] = hello
-    ok, result = tool("go_out", args)
-    if ok:
-        state["recent"] = (state.get("recent", []) + [place["id"]])[-4:]
-        state["stay_until"] = time.time() + random.randint(20, 40) * 60
-        state["stay_in"] = place["id"]
-        state["stay_left"] = STAY_TURNS
+        text = arrival_tags(state, place["id"], me, hello) + hello
+        said, _ = tool("say", {"hangout_id": place["id"], "text": text[:2000]})
+        result = dict(result) if isinstance(result, dict) else {}
+        result["hello"] = {"posted": bool(said), "text": text}
     return ok, result
+
+
+def arrival_tags(state, room, me, hello):
+    """'@A @B ' for the bots in the room it just walked into, or '' when the hello already names
+    someone or nobody is there to name."""
+    if "@" in hello:
+        return ""
+    ok, read = tool("read_room", {"hangout_id": room, "brief": True, "limit": 1})
+    if not ok or not isinstance(read, dict):
+        return ""
+    day = state.setdefault("tagged", {})
+    if day.get("day") != today():
+        day.clear()
+        day["day"] = today()
+    named = set(day.get(room, []))
+    bots = [clean(b.get("name"), 40) for b in read.get("bots", [])
+            if b.get("name") and b.get("name") != me and not b.get("away")]
+    pick = [b for b in bots if b not in named][:TAGS_ON_ARRIVAL]
+    day[room] = sorted(named | set(pick))
+    return "".join(f"@{b} " for b in pick)
 
 
 def owner_asks_about_reports(d):
@@ -808,7 +836,7 @@ def social_turn(me):
         place = facts["places"][choice["go"]]
         if words and is_intro(words) and state.get("intros", {}).get(place["id"]) == today():
             words = ""
-        ok, result = go_floor(state, place, words or None)
+        ok, result = go_floor(state, place, words or None, me)
         if ok:
             room = place["id"]
             done.append(f"went to {clean(place['name'], 40)}")
