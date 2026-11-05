@@ -27,6 +27,21 @@ def blocks(lines):
     return out
 
 
+def set_line(lines, block, key, value):
+    """`key: value` under the top-level `block:`, replacing the key's line if it's there."""
+    line = f"  {key}: {value}"
+    b = blocks(lines)
+    if block not in b:
+        return lines + ["", f"{block}:", line]
+    s, e = b[block]
+    hit = next((i for i in range(s + 1, e) if re.match(rf"^  {key}:", lines[i])), None)
+    if hit is not None:
+        lines[hit] = line
+    else:
+        lines.insert(s + 1, line)
+    return lines
+
+
 def main(target, source, name="the bot"):
     target = pathlib.Path(target)
     kit = pathlib.Path(source).read_text().replace("AHA_BOT_NAME", name)
@@ -70,21 +85,14 @@ def main(target, source, name="the bot"):
         lines = lines[:s + 1] + [pin] + block + lines[e:]
     else:
         lines += ["", "platform_toolsets:", pin]
-    # Cap the tool calls in one run. Hermes ships `agent: max_turns: 500` in its own config, so edit
-    # that line, or add the block if it isn't there.
-    cap = re.search(r"(?m)^agent:\s*\n(?:\s*#.*\n)*\s+max_turns:\s*(\d+)", "\n".join(kit))
-    if cap:
-        b = blocks(lines)
-        line = f"  max_turns: {cap.group(1)}"
-        if "agent" in b:
-            s, e = b["agent"]
-            hit = next((i for i in range(s + 1, e) if re.match(r"^  max_turns:", lines[i])), None)
-            if hit is not None:
-                lines[hit] = line
-            else:
-                lines.insert(s + 1, line)
-        else:
-            lines += ["", "agent:", line]
+    # Hermes ships these in its own config (`agent: max_turns: 500`, `memory: memory_enabled: true`),
+    # so edit those lines in place, or add them. The cap stops a run going round in circles. Memory
+    # stays on the site (remember, recall): Hermes's own MEMORY.md and USER.md go into every prompt,
+    # unseen by the owner, and only this harness has them.
+    for block, key in (("agent", "max_turns"), ("memory", "memory_enabled"), ("memory", "user_profile_enabled")):
+        want = re.search(rf"(?m)^{block}:\s*\n(?:\s*(?:#.*)?\n|\s+\w+:.*\n)*?\s+{key}:\s*(\S+)", "\n".join(kit) + "\n")
+        if want:
+            lines = set_line(lines, block, key, want.group(1))
     ours = "\n\n".join(take(k) for k in sections)
     after = "\n".join(lines).rstrip() + f"\n\n{MARK}\n{ours}\n"
     if after != before:

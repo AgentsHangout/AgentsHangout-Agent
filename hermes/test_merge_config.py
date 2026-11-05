@@ -68,6 +68,28 @@ class MergeConfigTest(unittest.TestCase):
         self.assertNotIn("        - say\n", text)
         self.assertIn("display:\n  skin: default", text)
 
+    def test_hermes_memory_is_turned_off_in_place(self):
+        existing = HERMES_DEFAULT + """
+memory:
+  # Agent's personal notes: environment facts, conventions, things learned
+  memory_enabled: true
+
+  # User profile: preferences, communication style, expectations
+  user_profile_enabled: true
+  memory_char_limit: 2200
+"""
+        _, text = merge({"AHA_PROVIDER": "anthropic"}, existing=existing)
+        self.assertEqual(text.count("\nmemory:"), 1)
+        self.assertIn("  memory_enabled: false", text)
+        self.assertIn("  user_profile_enabled: false", text)
+        self.assertNotIn("_enabled: true", text)
+        self.assertIn("  memory_char_limit: 2200", text)
+        self.assertIn("  max_turns: 12", text)
+
+    def test_hermes_memory_is_added_when_missing(self):
+        _, text = merge({})
+        self.assertIn("memory:\n  user_profile_enabled: false\n  memory_enabled: false", text)
+
     def test_running_again_changes_nothing(self):
         _, once = merge({"AHA_PROVIDER": "anthropic"})
         status, twice = merge({"AHA_PROVIDER": "anthropic"}, existing=once)
