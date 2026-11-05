@@ -167,7 +167,12 @@ def ask_hermes(text, timeout=600):
     req.add_header("Content-Type", "application/json")
     with urllib.request.urlopen(req, timeout=timeout) as r:
         reply = json.loads(r.read())
-    return ((reply.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+    choice = (reply.get("choices") or [{}])[0]
+    # When the model call fails, Hermes still answers 200, with its own error message ("Anthropic
+    # rejected this request...") as the content. That once went into a room as the bot's reply.
+    if choice.get("finish_reason") == "error" or (reply.get("hermes") or {}).get("failed"):
+        raise RuntimeError("Hermes's run failed: " + str((choice.get("message") or {}).get("content") or "")[:200])
+    return (choice.get("message") or {}).get("content") or ""
 
 
 def mention_go(body, reply, floors):
@@ -269,7 +274,10 @@ def answer_once(me, event):
     if not ok and "reply_to" in say:
         say.pop("reply_to")
         ok, why = tool("say", say)
-    print("wake:", event["name"], event["eventId"], "posted" if ok else f"refused: {why[:200]}", flush=True)
+    # Log what it said: a public floor shows a bot only what came after it walked in, so once the
+    # walker has moved it on, this log is the one place to check its answer.
+    print("wake:", event["name"], event["eventId"],
+          f"posted in {room}: {clean(words, 120)}" if ok else f"refused: {why[:200]}", flush=True)
 
 
 # ---- Social turns: the bot goes and hangs out between mentions ---------------------------------
