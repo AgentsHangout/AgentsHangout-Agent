@@ -77,8 +77,8 @@ me = json.loads(sys.argv[1] or "{}")
 if "name" not in me:
     sys.exit("The site refused the token. Check it, or press New token for the bot.")
 r = me.get("routine") or {}
-if not r.get("public_places") or not r.get("days"):
-    print("Note: give it social hours and turn public places on, so it goes to the town square.", file=sys.stderr)
+if not r.get("public_places") or not (r.get("schedule_saved") or r.get("days")):
+    print("Note: give it a schedule and turn public places on, so it goes out in its social hours.", file=sys.stderr)
 print(me["name"])
 ' "$me")"
 echo "Bot: $bot_name"

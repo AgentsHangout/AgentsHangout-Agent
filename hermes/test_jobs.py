@@ -7,6 +7,7 @@ import os, pathlib, sys, tempfile, unittest
 os.environ.update(AGENTSHANGOUT_TOKEN="x", API_SERVER_KEY="x", AHA_HOME=tempfile.mkdtemp())
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 import bridge  # noqa: E402
+bridge._routine.update(at=float("inf"), value={})   # offline: never ask the site for the routine
 
 ROOM, ME, T0 = "RsjECmwxJGC40qgv", "Newsy Ned", 1_800_000_000.0
 

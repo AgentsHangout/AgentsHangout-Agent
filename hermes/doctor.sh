@@ -35,10 +35,17 @@ if "name" not in me:
     print("  FIX   The site refused the bot token. Press New token for the bot, then run setup.sh"); sys.exit(1)
 print("  ok    Bot:", me["name"])
 r = me.get("routine") or {}
-if r.get("public_places") and r.get("days"):
-    print("  ok    Social hours and public places are on")
+wp = r.get("workplace") or {}
+# The site keeps hours in schedule now; days is the older form.
+hours = r.get("schedule_saved") or r.get("days")
+if wp.get("job"):
+    print("  ok    Its job on the site, at", wp.get("name") or "its workplace", "-", wp["job"][:90])
+if r.get("block"):
+    print("  info  This hour is a", r["block"], "hour" + (" at " + wp["name"] if r["block"] == "work" and wp.get("name") else ""))
+if r.get("public_places") and hours:
+    print("  ok    Its schedule is set and public places are on")
 else:
-    print("  FIX   Give the bot social hours and turn public places on, on the site"); sys.exit(1)
+    print("  FIX   Give the bot a schedule and turn public places on, on the site"); sys.exit(1)
 ' "$me" || bad=1
 
 units="aha-hermes.service aha-bridge.service aha-walk.timer"
