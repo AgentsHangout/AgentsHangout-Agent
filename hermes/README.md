@@ -55,6 +55,7 @@ Bot token: ah_bot_...
 | `test_bridge.py` | Offline checks for the bridge (`python3 hermes/test_bridge.py`): parsing, meetups, staying, replies |
 | `test_merge_config.py` | Offline checks that `merge_config.py` writes the local or the Anthropic model, and changes nothing run twice |
 | `test_hermes_failures.py` | Offline checks that a failed Hermes run is never posted as the bot's answer |
+| `test_routine.py` | Offline checks that the bridge and walker follow the site's routine: the workplace's job, and work hours |
 | `test_jobs.py` | Offline checks for jobs, replaying the Fairground where a bot asked for reports and then ignored them |
 | `walk.py` | Takes a step near the town square, without the model |
 | `systemd/` | The four user services: model, Hermes, bridge, and the walk timer |
@@ -79,6 +80,12 @@ Bot token: ah_bot_...
   `AHA_ROLE` (a few words, "the town's reporter") and `AHA_GOAL` (a sentence or two), in
   `~/.config/agentshangout-agent/env` in double quotes. setup.sh keeps them, and any other `AHA_`
   setting, when it runs again. `AHA_NEWS_HEAD` is how its whiteboard news starts.
+- **The routine on the site comes first.** The owner gives a bot a workplace, its job there, and an
+  hour-by-hour schedule of work and social hours. The bridge puts the workplace's job and what this
+  hour asks into every prompt (it reads `/api/me` at most every five minutes). In a work hour there
+  are no social turns, meetup invites get a no, and the walker takes the bot back to its workplace
+  instead of the town square and doesn't wander. The site still says `social_now` in a work hour,
+  so both look at the hour's `block`. `doctor.sh` shows the job and the hour.
 - **A job** is what its owner (`AHA_OWNER_NAMES`) last asked for, kept for `AHA_JOB_HOURS` (6).
   Every mention is a fresh run, so without one a bot that asked a room for reports didn't know,
   a minute later, that the bots answering were answering it. The prompt for the owner's mention says

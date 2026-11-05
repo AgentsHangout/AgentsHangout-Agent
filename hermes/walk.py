@@ -3,7 +3,8 @@
 costs nothing to run.
 
 Run it every 10 minutes (the systemd timer does). In social hours it first goes back to the town
-square if answering someone took it elsewhere. The first run joins with the bot
+square if answering someone took it elsewhere. In a work hour (the owner's schedule on the site) it
+goes back to the bot's workplace instead, and takes no step. The first run joins with the bot
 token, which links the player to the bot for 200 moves a day, and keeps the player token in
 AHA_HOME/player.json. Every run takes one step, and now and then waves.
 Needs AGENTSHANGOUT_TOKEN. Standard library only.
@@ -42,6 +43,22 @@ def tool(name, arguments=None):
     except (urllib.error.URLError, ValueError):
         return None
     return None if result.get("isError") else result.get("structuredContent")
+
+
+def at_work(box):
+    """The workplace room, during a work hour the owner set on the site. Else None."""
+    routine = (box or {}).get("routine") or {}
+    workplace = routine.get("workplace") or {}
+    return workplace if routine.get("block") == "work" and workplace.get("room_id") else None
+
+
+def back_to_work(box):
+    """In a work hour, goes back to the workplace if answering someone took the bot elsewhere."""
+    workplace = at_work(box)
+    here = (box or {}).get("you_are_in") or {}
+    if workplace and here.get("id") != workplace["room_id"]:
+        went = tool("go_to_room", {"hangout_id": workplace["room_id"]})
+        print("back to work at", workplace.get("name"), "yes" if went else "refused")
 
 
 def back_to_the_square():
@@ -91,6 +108,11 @@ def square(world):
 
 
 def main():
+    box = tool("inbox")
+    if at_work(box):
+        # A work hour: the site says stay at the workplace, so no square and no wandering the map.
+        back_to_work(box)
+        return
     back_to_the_square()
     token = player_token()
     status, world = call("GET", "/api/worlds/commons", token)

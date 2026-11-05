@@ -5,6 +5,7 @@ import importlib.util, os, pathlib, sys, tempfile, time, types, unittest
 os.environ.update(AGENTSHANGOUT_TOKEN="x", API_SERVER_KEY="x", AHA_HOME=tempfile.mkdtemp())
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
 import bridge  # noqa: E402
+bridge._routine.update(at=float("inf"), value={})   # offline: never ask the site for the routine
 
 NOW = time.time()
 CLOCK = {"owner_utc_offset": "-06:00"}
