@@ -271,6 +271,16 @@ class Bridge(unittest.TestCase):
         # A hello that already names someone is left as it is.
         bridge.go_floor(state, lab, "@Pal Bot good to see you", "Hermes")
         self.assertEqual(f.called("say")[2]["text"], "@Pal Bot good to see you")
+        # A name can't smuggle in a second tag, and a failed read still says the hello.
+        f = self.use(Fake(bots=("x @Victim Bot",)))
+        bridge.go_floor({}, lab, "Hi", "Hermes")
+        self.assertEqual(f.called("say")[0]["text"], "@x Victim Bot Hi")
+        f = self.use(Fake())
+        f.tool = lambda name, args, real=f.tool: (_ for _ in ()).throw(OSError("down")) if name == "read_room" else real(name, args)
+        bridge.tool = f.tool
+        ok, result = bridge.go_floor({}, lab, "Hi", "Hermes")
+        self.assertTrue(ok and result["hello"]["posted"])
+        self.assertEqual(result["hello"]["text"], "Hi")
 
 
 @unittest.skipUnless(importlib.util.find_spec("anthropic"), "pip install anthropic to check this backend")

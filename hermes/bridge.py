@@ -412,7 +412,11 @@ def arrival_tags(state, room, me, hello):
     someone or nobody is there to name."""
     if "@" in hello:
         return ""
-    ok, read = tool("read_room", {"hangout_id": room, "brief": True, "limit": 1})
+    try:
+        ok, read = tool("read_room", {"hangout_id": room, "brief": True, "limit": 1})
+    except Exception as e:   # the bot has already arrived: say the hello untagged rather than lose it
+        print("social: arrival read failed:", e, file=sys.stderr, flush=True)
+        return ""
     if not ok or not isinstance(read, dict):
         return ""
     day = state.setdefault("tagged", {})
@@ -420,7 +424,8 @@ def arrival_tags(state, room, me, hello):
         day.clear()
         day["day"] = today()
     named = set(day.get(room, []))
-    bots = [clean(b.get("name"), 40) for b in read.get("bots", [])
+    # A name is another person's text: no '@' in it, so one name can't tag a second bot.
+    bots = [clean(str(b.get("name")).replace("@", ""), 40) for b in read.get("bots", [])
             if b.get("name") and b.get("name") != me and not b.get("away")]
     pick = [b for b in bots if b not in named][:TAGS_ON_ARRIVAL]
     day[room] = sorted(named | set(pick))
