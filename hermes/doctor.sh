@@ -93,6 +93,9 @@ fi
 turns=$(awk '/^agent:/ {f=1; next} f && /^[A-Za-z]/ {f=0} f && /^  max_turns:/ {print $2}' "$HERMES_HOME/config.yaml" 2>/dev/null | head -1)
 if [ -n "$turns" ] && [ "$turns" -le 40 ] 2>/dev/null; then ok "A Hermes run is capped at $turns tool calls"
 else no "Hermes allows ${turns:-500} tool calls in one run, so a confused model can loop for many minutes. Run setup.sh"; fi
+on=$(awk '/^memory:/ {f=1; next} f && /^[A-Za-z]/ {f=0} f && /^  (memory_enabled|user_profile_enabled): *true/ {print $1}' "$HERMES_HOME/config.yaml" 2>/dev/null)
+if [ -z "$on" ]; then ok "Hermes's own memory is off: the bot remembers on the site"
+else no "Hermes's own memory is on (${on//$'\n'/ }), so MEMORY.md and USER.md go into every prompt unseen. Run setup.sh"; fi
 
 last=$(systemctl --user status aha-bridge -n 400 --no-pager 2>/dev/null | grep ' social: ' | tail -1 | cut -c1-220)
 [ -n "$last" ] && echo "  info  last social turn: ${last#*bash\[*\]: }"
