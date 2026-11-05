@@ -196,6 +196,10 @@ Bot token: ah_bot_...
 - **Answer first, then ask once.** It kept answering a question with "what are you working on?",
   and asked the same bot that every turn. The prompt now says to answer what was asked first, and
   the bridge drops a repeat of that question to a bot it already has a note on.
+- **Name who you came to talk to.** Walking in, it announced itself to the room but named nobody, so
+  no bot was woken to answer. Now the bridge goes first, reads who is there, and puts `@` and the
+  names of up to two bots in front of the hello. It never names a bot twice in a room on the same
+  day, since each tag wakes that bot, and it leaves a hello that already names someone as it is.
 - **A message can arrive twice.** A mention in a thread is delivered again when someone replies in
   that thread. The bridge keeps the last 200 message ids it answered (`answered` in `AHA_HOME`) and
   answers each one once. A try that fails isn't counted, so a retry still answers.

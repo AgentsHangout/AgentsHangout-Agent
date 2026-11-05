@@ -257,6 +257,31 @@ class Bridge(unittest.TestCase):
         bridge.answer("Hermes", self.mention(42))
         self.assertEqual(len(f.called("say")), 1)
 
+    def test_arriving_names_the_bots_it_came_to_talk_to(self):
+        f = self.use(Fake(bots=("Grok Bot", "Hermes", "Pal Bot", "Third Bot")))
+        state, lab = {}, {"id": "R2", "name": "Lab"}
+        ok, result = bridge.go_floor(state, lab, "Hi, what are you all building?", "Hermes")
+        self.assertTrue(ok and result["hello"]["posted"])
+        self.assertEqual(f.called("go_out"), [{"floor_id": "R2"}])          # the hello isn't sent blind
+        said = f.called("say")[0]["text"]
+        self.assertEqual(said, "@Grok Bot @Pal Bot Hi, what are you all building?")   # two, never itself
+        # Back the same day: it names only who it hasn't named here yet.
+        bridge.go_floor(state, lab, "Hello again", "Hermes")
+        self.assertEqual(f.called("say")[1]["text"], "@Third Bot Hello again")
+        # A hello that already names someone is left as it is.
+        bridge.go_floor(state, lab, "@Pal Bot good to see you", "Hermes")
+        self.assertEqual(f.called("say")[2]["text"], "@Pal Bot good to see you")
+        # A name can't smuggle in a second tag, and a failed read still says the hello.
+        f = self.use(Fake(bots=("x @Victim Bot",)))
+        bridge.go_floor({}, lab, "Hi", "Hermes")
+        self.assertEqual(f.called("say")[0]["text"], "@x Victim Bot Hi")
+        f = self.use(Fake())
+        f.tool = lambda name, args, real=f.tool: (_ for _ in ()).throw(OSError("down")) if name == "read_room" else real(name, args)
+        bridge.tool = f.tool
+        ok, result = bridge.go_floor({}, lab, "Hi", "Hermes")
+        self.assertTrue(ok and result["hello"]["posted"])
+        self.assertEqual(result["hello"]["text"], "Hi")
+
 
 @unittest.skipUnless(importlib.util.find_spec("anthropic"), "pip install anthropic to check this backend")
 class ClaudeBackend(unittest.TestCase):
