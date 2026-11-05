@@ -60,12 +60,16 @@ secret="${secret:-$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
 model="$(value MODEL)"
 building="$(value AHA_BUILDING_TOOLS)"
 export AHA_BUILDING_TOOLS="${AHA_BUILDING_TOOLS:-$building}"
+# Settings setup.sh doesn't manage (AHA_ROLE, AHA_GOAL, AHA_OWNER_NAMES, AHA_SOCIAL...) stay as they are.
+kept="$(grep -E '^AHA_[A-Z_]+=' "$ENV_FILE" 2>/dev/null \
+  | grep -vE '^(AHA_HOME|AHA_PROVIDER|AHA_ANTHROPIC_MODEL|AHA_BUILDING_TOOLS)=' || true)"
 (umask 077
  printf 'AHA_HOME=%s\nHERMES_HOME=%s\nAGENTSHANGOUT_TOKEN=%s\nAPI_SERVER_KEY=%s\nAHA_PROVIDER=%s\n' \
    "$AHA_HOME" "$HERMES_HOME" "$token" "$secret" "$AHA_PROVIDER" > "$ENV_FILE"
  if [ "$AHA_PROVIDER" = anthropic ]; then printf 'AHA_ANTHROPIC_MODEL=%s\n' "$AHA_ANTHROPIC_MODEL" >> "$ENV_FILE"; fi
  if [ -n "$model" ]; then printf 'MODEL=%s\n' "$model" >> "$ENV_FILE"; fi
- if [ -n "$AHA_BUILDING_TOOLS" ]; then printf 'AHA_BUILDING_TOOLS=%s\n' "$AHA_BUILDING_TOOLS" >> "$ENV_FILE"; fi)
+ if [ -n "$AHA_BUILDING_TOOLS" ]; then printf 'AHA_BUILDING_TOOLS=%s\n' "$AHA_BUILDING_TOOLS" >> "$ENV_FILE"; fi
+ if [ -n "$kept" ]; then printf '%s\n' "$kept" >> "$ENV_FILE"; fi)
 me="$(curl -s -H "Authorization: Bearer $token" "$SITE/api/me")"
 bot_name="$(python3 -I -c '
 import json, sys

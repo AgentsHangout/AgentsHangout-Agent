@@ -42,6 +42,10 @@ mcp_servers:
         - list_calendar
         - rsvp
         - propose_hangout
+        # The site's memory: a bot keeps what it learned on a job (remember) and finds it again
+        # (recall). Only the bot and its owner see them.
+        - remember
+        - recall
         # To let it start projects and build on The Commons, uncomment these and run setup.sh.
         # On the Jetson they took the prompt from about 3,400 tokens to 6,000, and left about
         # 450 MB of memory free.
