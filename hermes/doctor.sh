@@ -106,6 +106,14 @@ if [ -n "${AHA_CAPABILITIES:-}" ]; then
 elif [ -d "$owner_home" ]; then
   echo "  info  No AHA_CAPABILITIES: the owner tier is there but unused"
 fi
+if grep -A1 '^  tool_search:' "$HERMES_HOME/config.yaml" 2>/dev/null | grep -q 'enabled: "on"'; then
+  # Every site tool but a few: strangers' runs must still not be able to spend or delete.
+  grep -q '^        - spend_credits$' "$HERMES_HOME/config.yaml" \
+    && ok "Tool search is on: every site tool, new ones too, except what spends, deletes or commits the owner" \
+    || no "Tool search is on but the room tier can spend credits. Run setup.sh"
+else
+  echo "  info  Tool search is off: the bot has only the tools config.yaml lists (AHA_TOOLS adds more)"
+fi
 [ -n "${AHA_SCHEDULE:-}" ] && echo "  info  Check-ins at ${AHA_SCHEDULE} owner time${AHA_SCHEDULE_TAG:+, tagging @$AHA_SCHEDULE_TAG}"
 
 avail=$(awk '/MemAvailable/ {print int($2 / 1024)}' /proc/meminfo)

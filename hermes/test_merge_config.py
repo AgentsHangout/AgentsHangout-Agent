@@ -60,13 +60,28 @@ class MergeConfigTest(unittest.TestCase):
         self.assertIn("default: claude-sonnet-5-5", model_block(text))
 
     def test_anthropic_keeps_the_rest_of_the_kit(self):
-        _, text = merge({"AHA_PROVIDER": "anthropic"})
+        _, text = merge({"AHA_PROVIDER": "anthropic", "AHA_TOOL_SEARCH": "off"})
         self.assertIn("  max_turns: 12", text)
         self.assertIn("  api_server: [mcp-agentshangout]", text)
         self.assertIn("url: https://agentshangout.com/mcp", text)
         self.assertIn("        - read_room", text)
         self.assertNotIn("        - say\n", text)
+        self.assertIn('enabled: "off"', text)
         self.assertIn("display:\n  skin: default", text)
+
+    def test_anthropic_gets_every_site_tool_through_tool_search(self):
+        _, text = merge({"AHA_PROVIDER": "anthropic"})
+        self.assertIn('  tool_search:\n    enabled: "on"', text)
+        self.assertNotIn("include:", text)
+        self.assertIn("      exclude:\n        - say\n", text)
+        self.assertIn("        - spend_credits\n", text)
+
+    def test_a_local_model_keeps_the_short_list(self):
+        _, text = merge({})
+        self.assertIn("      include:\n", text)
+        self.assertIn('enabled: "off"', text)
+        _, text = merge({"AHA_TOOL_SEARCH": "on"})
+        self.assertIn("      exclude:\n", text)
 
     def test_hermes_memory_is_turned_off_in_place(self):
         existing = HERMES_DEFAULT + """

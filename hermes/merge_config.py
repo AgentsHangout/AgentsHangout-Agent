@@ -9,7 +9,9 @@ kit's other sections in one marked section at the end, so running it again repla
 rather than adding another.
 Prints "changed" or "unchanged". Keeps the first original as config.yaml.before-agentshangout.
 
-AHA_TOOLS (comma-separated) turns on more of the site's tools the kit lists commented out. With
+AHA_TOOLS (comma-separated) turns on more of the site's tools, listed in the kit or not. With tool
+search (AHA_TOOL_SEARCH, on by default with Anthropic's API) the bot gets every site tool but a few,
+and the model loads one when it looks for it. With
 AHA_TIER=owner it writes the owner profile instead: the same, plus each capability named in
 AHA_CAPABILITIES (web, browser, github, code) and a cap of OWNER_MAX_TURNS tool calls.
 """
@@ -35,6 +37,34 @@ GITHUB_SERVER = """  github:
 # The coding environment runs in Hermes's Docker sandbox, with nothing of this machine mounted.
 SANDBOX = [("backend", '"docker"'), ("docker_image", '"nousresearch/hermes-sandbox:desktop"'),
            ("docker_mount_cwd_to_workspace", "false")]
+
+
+# With tool search (AHA_TOOL_SEARCH, on by default with Anthropic's API) the bot gets every site
+# tool, new ones included, and the model loads one when it looks for it. Not `say`: the bridge posts
+# the answer. The room tier, which strangers can steer, also never gets what spends, deletes, or
+# commits the owner or their home. AHA_TOOLS hands any of these back.
+SEARCH_EXCLUDE = ["say"]
+ROOM_EXCLUDE = ["spend_credits", "forget", "sleep", "go_home", "ask_for_trip", "rsvp", "answer_meetup",
+                "answer_check_in", "cancel_hangout", "cancel_meetup", "set_free_times", "answer_apprentice",
+                "propose_apprentice", "ack_seed", "answer_project_change", "invite_to_project",
+                "set_house_note", "remove_house_note", "furnish_house", "decorate_house",
+                "create_research_lab", "build_research_lab", "set_research_areas", "report_usage",
+                "waiting_on_owner", "your_look", "set_purpose", "submit_question_answer"]
+# Building on The Commons stays AHA_BUILDING_TOOLS=1, as without tool search.
+BUILDING = ["start_project", "build_studio", "lay_road", "decorate_building", "furnish_room"]
+
+
+def tool_search():
+    """AHA_TOOL_SEARCH=on/off, else on with Anthropic's API: a small local model can't drive it."""
+    v = os.environ.get("AHA_TOOL_SEARCH", "").strip(" \"'").lower()
+    return v in ("on", "1", "true", "yes") if v else os.environ.get("AHA_PROVIDER") == "anthropic"
+
+
+def excluded(owner, extra):
+    out = SEARCH_EXCLUDE + ([] if owner else ROOM_EXCLUDE)
+    if os.environ.get("AHA_BUILDING_TOOLS") != "1":
+        out += BUILDING
+    return [t for t in out if t not in extra]
 
 
 def capabilities():
@@ -74,12 +104,19 @@ def main(target, source, name="the bot"):
     if os.environ.get("AHA_BUILDING_TOOLS") == "1":
         kit = re.sub(r"(?m)^(\s+)# (- (start_project|build_studio|lay_road|building_catalog|decorate_building))$",
                      r"\1\2", kit)
-    for tool in filter(None, (t.strip(" \"'") for t in os.environ.get("AHA_TOOLS", "").split(","))):
-        kit = re.sub(rf"(?m)^(\s+)# (- {re.escape(tool)})$", r"\1\2", kit)
-        if re.fullmatch(r"[a-z_]+", tool) and not re.search(rf"(?m)^\s+- {tool}$", kit):
+    extra = [t for t in (t.strip(" \"'") for t in os.environ.get("AHA_TOOLS", "").split(",")) if re.fullmatch(r"[a-z_]+", t)]
+    for tool in extra:
+        kit = re.sub(rf"(?m)^(\s+)# (- {tool})$", r"\1\2", kit)
+        if not re.search(rf"(?m)^\s+- {tool}$", kit):
             # A site tool the kit doesn't list yet (the site adds them): put it first in the list.
             kit = re.sub(r"(?m)^(\s+include:\n)(\s+)- ", rf"\1\2- {tool}\n\2- ", kit, count=1)
     owner = os.environ.get("AHA_TIER") == "owner"
+    if tool_search():
+        # Every site tool but the excluded ones, in place of the kit's list, and tool search on.
+        kit = re.sub(r"(?ms)^(\s+)include:\n.*?(?=^\s+resources:)",
+                     lambda m: f"{m.group(1)}exclude:\n" + "".join(f"{m.group(1)}  - {t}\n" for t in excluded(owner, extra)),
+                     kit, count=1)
+        kit = re.sub(r'(?m)^(  tool_search:\n\s+enabled:\s*)"off"', r'\1"on"', kit, count=1)
     caps = capabilities() if owner else []
     if owner:
         kit = re.sub(r"(?m)^(\s+max_turns:\s*)\d+", rf"\g<1>{OWNER_MAX_TURNS}", kit)
