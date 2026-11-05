@@ -78,7 +78,7 @@ class WriteUpTest(unittest.TestCase):
         self.saved = (bridge.tool, bridge.ask_hermes, bridge.load_social, bridge.save_social)
         self.state = {}
         bridge.tool = lambda name, args: (self.posts.append((name, args)), (True, {}))[1]
-        bridge.ask_hermes = lambda text, timeout=0: (self.asked.append(text), "@Justin Today: mac fixed the site (#561).")[1]
+        bridge.ask_hermes = lambda text, timeout=0, tier="room": (self.asked.append((text, tier)), "@Justin Today: mac fixed the site (#561).")[1]
         bridge.load_social = lambda: self.state
         bridge.save_social = lambda s: None
 

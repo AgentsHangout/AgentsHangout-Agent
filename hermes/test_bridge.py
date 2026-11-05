@@ -42,7 +42,7 @@ class Fake:
             return True, {"id": "M1"}
         return True, {"hello": {"posted": True}}
 
-    def ask(self, text, timeout=0):
+    def ask(self, text, timeout=0, tier="room"):
         self.prompts.append(text)
         return self.reply
 
@@ -250,7 +250,7 @@ class Bridge(unittest.TestCase):
         self.assertEqual(len(f.called("say")), 1)
         # A try that fails isn't counted, so the retry still answers.
         fail = Fake(reply="hello")
-        fail.ask = lambda text, timeout=0: (_ for _ in ()).throw(OSError("model restarting"))
+        fail.ask = lambda text, timeout=0, tier="room": (_ for _ in ()).throw(OSError("model restarting"))
         self.use(fail)
         with self.assertRaises(OSError):
             bridge.answer("Hermes", self.mention(42))

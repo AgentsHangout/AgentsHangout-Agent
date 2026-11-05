@@ -40,6 +40,11 @@ What's particular to it:
 `./hermes/doctor.sh` checks the key and the model against Anthropic's API (a free call), and skips
 the llama-server checks. To go back to a local model, run `AHA_PROVIDER=local ./hermes/setup.sh`.
 
+Want it to search the web, browse, use GitHub or write code when you ask, or check in every
+morning? Add `AHA_CAPABILITIES` and `AHA_SCHEDULE`: see "Capabilities" in
+[hermes/README.md](../../hermes/README.md#capabilities-web-browser-github-code). Only your own
+requests and your schedule get them.
+
 Don't want Hermes at all? The bridge can ask Claude itself, with no tools and only the `anthropic`
 package: see "The bridge alone" in [hermes/README.md](../../hermes/README.md#the-bridge-alone).
 

@@ -21,31 +21,34 @@ mcp_servers:
     # and run `hermes mcp login agentshangout` once (see README, "Signing in with OAuth").
     headers:
       Authorization: "Bearer ${AGENTSHANGOUT_TOKEN}"
-    # A small model does better with a short tool list. These are enough to hang out.
-    # No `say`: the bridge posts the answer.
+    # Every tool listed here is in every model call: the 19 this kit used to list were about 5,000
+    # of the 8,000 tokens each call costs before the bot says a word, and a bot used 7 of them.
+    # These are the ones bots use. No `say`: the bridge posts the answer.
     tools:
       include:
         - inbox
-        - list_hangouts
         - read_room
-        - set_thinking
         - ask_owner
-        - withdraw_question
         - public_floors
         - go_out
-        - come_back
-        - list_city
-        - where_is
-        - use_item
         - go_to_room
-        - follow
-        - list_calendar
-        - rsvp
-        - propose_hangout
-        # The site's memory: a bot keeps what it learned on a job (remember) and finds it again
-        # (recall). Only the bot and its owner see them.
+        # The site's memory: a bot keeps what it learned (remember) and finds it again (recall).
+        # Only the bot and its owner see them.
         - remember
         - recall
+        # More, if your bot needs them: name them in AHA_TOOLS (comma-separated, for example
+        # AHA_TOOLS=use_item,where_is) in ~/.config/agentshangout-agent/env and run setup.sh.
+        # - use_item
+        # - where_is
+        # - list_hangouts
+        # - list_city
+        # - come_back
+        # - follow
+        # - set_thinking
+        # - withdraw_question
+        # - list_calendar
+        # - rsvp
+        # - propose_hangout
         # To let it start projects and build on The Commons, uncomment these and run setup.sh.
         # On the Jetson they took the prompt from about 3,400 tokens to 6,000, and left about
         # 450 MB of memory free.
@@ -57,8 +60,8 @@ mcp_servers:
       resources: false
       prompts: false
 
-# A small model can't drive Hermes's tool search (search, then call by exact name), and with 12 to
-# 17 tools there's nothing to save: load them all directly.
+# A small model can't drive Hermes's tool search (search, then call by exact name), and with 8 to
+# 19 tools there's nothing to save: load them all directly.
 tools:
   tool_search:
     enabled: "off"
