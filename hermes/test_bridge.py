@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Offline checks for bridge.py: no network, no model. Run: python3 hermes/test_bridge.py"""
-import os, pathlib, sys, tempfile, time, unittest
+import importlib.util, os, pathlib, sys, tempfile, time, types, unittest
 
 os.environ.update(AGENTSHANGOUT_TOKEN="x", API_SERVER_KEY="x", AHA_HOME=tempfile.mkdtemp())
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
@@ -219,6 +219,102 @@ class Bridge(unittest.TestCase):
         self.assertFalse(bridge.owner_asks_about_reports(dict(d, is_bot=True)))
         self.assertIn("the piano is slow", bridge.prompt("Hermes", ev, (), bridge.report_lines(bridge.load_social())))
         self.assertNotIn("piano", bridge.prompt("Hermes", ev))
+
+    def mention(self, mid=7):
+        return {"name": "mention", "eventId": f"e{mid}",
+                "data": {"hangout_id": "R1", "message_id": mid, "speaker": "Justin", "is_bot": False, "body": "hi Hermes"}}
+
+    def test_prompt_without_tools_carries_the_room(self):
+        f = self.use(Fake(msgs=[{"id": 6, "from": "Grok Bot", "text": "the booth is up", "kind": "chat"},
+                                {"id": 7, "from": "Justin", "text": "hi Hermes", "kind": "chat"}]))
+        self.assertIn("call read_room with hangout_id R1", bridge.prompt("Hermes", self.mention()))
+        self.assertEqual(f.called("read_room"), [])               # Hermes reads the room itself
+        bridge.BACKEND = "anthropic"
+        try:
+            text = bridge.prompt("Hermes", self.mention())
+        finally:
+            bridge.BACKEND = "hermes"
+        self.assertIn("#6 Grok Bot: the booth is up", text)
+        self.assertNotIn("Use your tools", text)
+        self.assertNotIn("call read_room", text)
+        self.assertEqual(f.called("read_room"), [{"hangout_id": "R1", "brief": True, "limit": 8}])
+
+    def test_a_message_delivered_twice_gets_one_answer(self):
+        f = self.use(Fake(reply="hello"))
+        bridge.ANSWERED = pathlib.Path(tempfile.mkdtemp()) / "answered"
+        self.addCleanup(setattr, bridge, "ranked_floors", bridge.ranked_floors)
+        bridge.ranked_floors = lambda *a, **k: []
+        bridge.answer("Hermes", self.mention(41))
+        bridge.answer("Hermes", self.mention(41))                 # a thread reply delivers it again
+        self.assertEqual(len(f.called("say")), 1)
+        # A try that fails isn't counted, so the retry still answers.
+        fail = Fake(reply="hello")
+        fail.ask = lambda text, timeout=0: (_ for _ in ()).throw(OSError("model restarting"))
+        self.use(fail)
+        with self.assertRaises(OSError):
+            bridge.answer("Hermes", self.mention(42))
+        f = self.use(Fake(reply="hello"))
+        bridge.answer("Hermes", self.mention(42))
+        self.assertEqual(len(f.called("say")), 1)
+
+
+@unittest.skipUnless(importlib.util.find_spec("anthropic"), "pip install anthropic to check this backend")
+class ClaudeBackend(unittest.TestCase):
+    """claude_backend.py with a stand-in client: no network, no key, no spend."""
+
+    class Client:
+        def __init__(self, reply="hello", stop="end_turn", error=None):
+            self.reply, self.stop, self.error, self.sent = reply, stop, error, []
+            self.beta = types.SimpleNamespace(messages=self)
+
+        def with_options(self, **kw):
+            return self
+
+        def create(self, **kw):
+            self.sent.append(kw)
+            if self.error:
+                raise self.error
+            return types.SimpleNamespace(stop_reason=self.stop,
+                                         content=[types.SimpleNamespace(type="text", text=self.reply)])
+
+    def setUp(self):
+        import claude_backend
+        self.cb = claude_backend
+        self.cb.USAGE = pathlib.Path(tempfile.mkdtemp()) / "usage.json"
+
+    def test_asks_the_default_model_with_a_fallback(self):
+        self.cb._client = c = self.Client("hi there")
+        self.assertEqual(self.cb.ask("say hi"), "hi there")
+        sent = c.sent[0]
+        self.assertEqual(sent["model"], "claude-opus-5-5")
+        self.assertEqual((sent["fallbacks"], sent["betas"]), ("default", ["server-side-fallback-2026-07-01"]))
+        self.assertEqual(sent["output_config"], {"effort": "medium"})
+        self.assertEqual(sent["messages"], [{"role": "user", "content": "say hi"}])
+
+    def test_a_refusal_or_a_bad_request_stays_quiet(self):
+        self.cb._client = self.Client("text", stop="refusal")
+        self.assertEqual(self.cb.ask("x"), "")
+        import anthropic, httpx
+        bad = anthropic.BadRequestError("bad", response=httpx.Response(400, request=httpx.Request("POST", "https://x")), body=None)
+        self.cb._client = self.Client(error=bad)
+        self.assertEqual(self.cb.ask("x"), "")
+
+    def test_a_server_error_is_raised_for_the_bridge_to_retry(self):
+        import anthropic, httpx
+        down = anthropic.InternalServerError("down", response=httpx.Response(500, request=httpx.Request("POST", "https://x")), body=None)
+        self.cb._client = self.Client(error=down)
+        with self.assertRaises(anthropic.APIStatusError):
+            self.cb.ask("x")
+
+    def test_the_daily_limit_stops_asking(self):
+        self.cb._client = c = self.Client("hi")
+        limit, self.cb.DAILY_CALLS = self.cb.DAILY_CALLS, 2
+        try:
+            answers = [self.cb.ask("x") for _ in range(3)]
+        finally:
+            self.cb.DAILY_CALLS = limit
+        self.assertEqual(answers, ["hi", "hi", ""])
+        self.assertEqual(len(c.sent), 2)
 
 
 if __name__ == "__main__":

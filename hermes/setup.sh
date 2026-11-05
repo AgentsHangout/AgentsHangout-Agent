@@ -98,7 +98,7 @@ chmod 600 "$dotenv"
 step "7/8 Services"
 model_changed=no
 cmp -s "$KIT/run-model.sh" "$AHA_HOME/run-model.sh" || model_changed=yes
-cp "$KIT/bridge.py" "$KIT/walk.py" "$KIT/run-model.sh" "$AHA_HOME"/
+cp "$KIT/bridge.py" "$KIT/claude_backend.py" "$KIT/walk.py" "$KIT/run-model.sh" "$AHA_HOME"/
 mkdir -p "$HOME/.config/systemd/user"
 cp "$KIT"/systemd/aha-* "$HOME/.config/systemd/user/"
 systemctl --user daemon-reload
