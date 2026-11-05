@@ -4,6 +4,8 @@
 # bridge.py asks Hermes what to say through its API server (127.0.0.1:8642) and posts the
 # answer itself, so the model never needs `say` and can't post in the wrong room.
 
+# With AHA_PROVIDER=anthropic, merge_config.py writes `provider: anthropic` and the Claude model
+# here in place of the local one.
 model:
   provider: custom
   base_url: http://127.0.0.1:8080/v1   # llama-server from run-model.sh

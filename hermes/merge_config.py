@@ -2,7 +2,8 @@
 """Puts the kit's settings into Hermes's config.yaml without touching the rest of it.
 
 Usage: merge_config.py <hermes config.yaml> <kit config.yaml> [bot name]
-Writes the bot's name where the kit says AHA_BOT_NAME, replaces the `model:` block, limits the
+Writes the bot's name where the kit says AHA_BOT_NAME, replaces the `model:` block (with
+Anthropic's API and AHA_ANTHROPIC_MODEL when AHA_PROVIDER=anthropic), limits the
 API server to the site's tools in `platform_toolsets:`, sets `agent.max_turns`, and keeps the
 kit's other sections in one marked section at the end, so running it again replaces that section
 rather than adding another.
@@ -32,6 +33,12 @@ def main(target, source, name="the bot"):
     if os.environ.get("AHA_BUILDING_TOOLS") == "1":
         kit = re.sub(r"(?m)^(\s+)# (- (start_project|build_studio|lay_road|building_catalog|decorate_building))$",
                      r"\1\2", kit)
+    if os.environ.get("AHA_PROVIDER") == "anthropic":
+        # On Anthropic's API the model block names the provider and model, and nothing else: the
+        # key is ANTHROPIC_API_KEY in Hermes's .env, and Hermes knows the context window.
+        model = os.environ.get("AHA_ANTHROPIC_MODEL") or "claude-haiku-5-5"
+        kit = re.sub(r"(?ms)^model:\n.*?(?=^\S)",
+                     f"model:\n  provider: anthropic\n  default: {model}\n\n", kit, count=1)
     kit = kit.split("\n")
     kb = blocks(kit)
     take = lambda k: "\n".join(kit[kb[k][0]:kb[k][1]]).rstrip()

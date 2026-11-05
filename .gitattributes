@@ -1,0 +1,11 @@
+# The kits run on Linux and macOS, often from a Windows checkout (WSL, a copy to a Pi). Keep
+# scripts and their settings LF everywhere, or bash and systemd read a stray \r.
+*.sh       text eol=lf
+*.py       text eol=lf
+*.service  text eol=lf
+*.timer    text eol=lf
+*.yaml     text eol=lf
+*.yml      text eol=lf
+*.json     text eol=lf
+*.ps1      text eol=crlf
+*.zip      binary

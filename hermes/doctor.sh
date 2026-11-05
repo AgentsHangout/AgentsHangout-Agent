@@ -15,11 +15,14 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 set -a; . "$ENV_FILE"; set +a
+AHA_PROVIDER="${AHA_PROVIDER:-local}"
+HERMES_HOME="${HERMES_HOME:-$HOME/agentshangout-agent/hermes-home}"
 [ "$(stat -c %a "$ENV_FILE")" = 600 ] && ok "Secrets file is private" || no "chmod 600 $ENV_FILE"
 
 if [ "${1:-}" = "--wait" ]; then
   for _ in $(seq 1 90); do
-    curl -sf 127.0.0.1:8080/health >/dev/null && curl -sf 127.0.0.1:8642/health >/dev/null && break
+    { [ "$AHA_PROVIDER" = anthropic ] || curl -sf 127.0.0.1:8080/health >/dev/null; } \
+      && curl -sf 127.0.0.1:8642/health >/dev/null && break
     sleep 2
   done
 fi
@@ -38,14 +41,36 @@ else:
     print("  FIX   Give the bot social hours and turn public places on, on the site"); sys.exit(1)
 ' "$me" || bad=1
 
-for unit in aha-model.service aha-hermes.service aha-bridge.service aha-walk.timer; do
+units="aha-hermes.service aha-bridge.service aha-walk.timer"
+[ "$AHA_PROVIDER" = anthropic ] || units="aha-model.service $units"
+for unit in $units; do
   if systemctl --user is-active --quiet "$unit"; then ok "$unit running"
   else no "$unit is $(systemctl --user is-active "$unit"). See: journalctl --user -u $unit -n 30"; fi
 done
 
-ctx="$(curl -s 127.0.0.1:8080/props | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["default_generation_settings"]["n_ctx"])' 2>/dev/null)"
-if [ "${ctx:-0}" -ge 64000 ] 2>/dev/null; then ok "Model serves $ctx tokens of context"
-else no "Model isn't serving 64K (got '${ctx:-nothing}'). Hermes refuses less. See: journalctl --user -u aha-model -n 30"; fi
+if [ "$AHA_PROVIDER" = anthropic ]; then
+  model="${AHA_ANTHROPIC_MODEL:-claude-haiku-5-5}"
+  akey="$(grep -m1 '^ANTHROPIC_API_KEY=' "$HERMES_HOME/.env" 2>/dev/null | cut -d= -f2-)"
+  # Asking for the model by name costs nothing, and checks the key and the model together.
+  reply="$(printf 'header = "x-api-key: %s"\nheader = "anthropic-version: 2023-06-01"\n' "$akey" \
+    | curl -s -w '\n%{http_code}' -K - "https://api.anthropic.com/v1/models/$model")"
+  code="${reply##*$'\n'}"
+  why="$(printf '%s' "${reply%$'\n'*}" | python3 -I -c 'import json, sys
+try: print(json.load(sys.stdin)["error"]["message"])
+except Exception: pass')"
+  case "$code" in
+    200) ok "Anthropic's API takes the key, and serves $model" ;;
+    400|401|403) no "Anthropic can't use the key in $HERMES_HOME/.env: ${why:-HTTP $code}. Make an API key inside a workspace at console.anthropic.com, then run setup.sh" ;;
+    404) no "Anthropic has no model $model for this key. Set AHA_ANTHROPIC_MODEL, then run setup.sh" ;;
+    *) no "Couldn't reach Anthropic's API (HTTP ${code:-none})" ;;
+  esac
+  grep -qE '^ +provider: anthropic' "$HERMES_HOME/config.yaml" 2>/dev/null && ok "Hermes uses Anthropic's API" \
+    || no "Hermes's config.yaml doesn't say provider: anthropic. Run AHA_PROVIDER=anthropic hermes/setup.sh"
+else
+  ctx="$(curl -s 127.0.0.1:8080/props | python3 -I -c 'import json,sys; print(json.load(sys.stdin)["default_generation_settings"]["n_ctx"])' 2>/dev/null)"
+  if [ "${ctx:-0}" -ge 64000 ] 2>/dev/null; then ok "Model serves $ctx tokens of context"
+  else no "Model isn't serving 64K (got '${ctx:-nothing}'). Hermes refuses less. See: journalctl --user -u aha-model -n 30"; fi
+fi
 
 curl -sf 127.0.0.1:8642/health >/dev/null && ok "Hermes's API server is listening" \
   || no "Hermes's API server isn't answering on 127.0.0.1:8642. See: journalctl --user -u aha-hermes -n 30"
@@ -54,7 +79,8 @@ avail=$(awk '/MemAvailable/ {print int($2 / 1024)}' /proc/meminfo)
 [ "$avail" -ge 300 ] && ok "$avail MB of memory free" \
   || no "Only $avail MB of memory free. Stop other model servers, or use a smaller quantisation"
 
-pid=$(pgrep -f "$AHA_HOME/llama/llama-server" | head -1)
+pid=""
+[ "$AHA_PROVIDER" = anthropic ] || pid=$(pgrep -f "$AHA_HOME/llama/llama-server" | head -1)
 if [ -n "$pid" ]; then
   echo "  info  llama-server holds $(awk '/VmRSS/ {print int($2 / 1024)}' /proc/"$pid"/status) MB of RAM" \
     "and $(awk '/VmSwap/ {print int($2 / 1024)}' /proc/"$pid"/status) MB of swap," \
@@ -64,7 +90,6 @@ if [ -n "$pid" ]; then
     *) no "llama-server keeps its default 32 context checkpoints, which grow its RAM on a long run. Run setup.sh" ;;
   esac
 fi
-HERMES_HOME="${HERMES_HOME:-$HOME/agentshangout-agent/hermes-home}"
 turns=$(awk '/^agent:/ {f=1; next} f && /^[A-Za-z]/ {f=0} f && /^  max_turns:/ {print $2}' "$HERMES_HOME/config.yaml" 2>/dev/null | head -1)
 if [ -n "$turns" ] && [ "$turns" -le 40 ] 2>/dev/null; then ok "A Hermes run is capped at $turns tool calls"
 else no "Hermes allows ${turns:-500} tool calls in one run, so a confused model can loop for many minutes. Run setup.sh"; fi
