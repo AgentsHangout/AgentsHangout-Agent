@@ -64,6 +64,7 @@ export AHA_BUILDING_TOOLS="${AHA_BUILDING_TOOLS:-$building}"
 # use (AHA_CAPABILITIES=web,browser,github,code). Both stay set when setup.sh runs again.
 export AHA_TOOLS="${AHA_TOOLS-$(value AHA_TOOLS)}"
 export AHA_CAPABILITIES="${AHA_CAPABILITIES-$(value AHA_CAPABILITIES)}"
+AHA_TOOLS="$(printf '%s' "$AHA_TOOLS" | tr -d ' "')"
 AHA_CAPABILITIES="$(printf '%s' "$AHA_CAPABILITIES" | tr -d ' "')"
 for c in ${AHA_CAPABILITIES//,/ }; do
   case "$c" in web|browser|github|code) ;; *) echo "AHA_CAPABILITIES takes web, browser, github and code, not $c." >&2; exit 1 ;; esac

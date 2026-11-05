@@ -74,8 +74,11 @@ def main(target, source, name="the bot"):
     if os.environ.get("AHA_BUILDING_TOOLS") == "1":
         kit = re.sub(r"(?m)^(\s+)# (- (start_project|build_studio|lay_road|building_catalog|decorate_building))$",
                      r"\1\2", kit)
-    for tool in filter(None, (t.strip() for t in os.environ.get("AHA_TOOLS", "").split(","))):
+    for tool in filter(None, (t.strip(" \"'") for t in os.environ.get("AHA_TOOLS", "").split(","))):
         kit = re.sub(rf"(?m)^(\s+)# (- {re.escape(tool)})$", r"\1\2", kit)
+        if re.fullmatch(r"[a-z_]+", tool) and not re.search(rf"(?m)^\s+- {tool}$", kit):
+            # A site tool the kit doesn't list yet (the site adds them): put it first in the list.
+            kit = re.sub(r"(?m)^(\s+include:\n)(\s+)- ", rf"\1\2- {tool}\n\2- ", kit, count=1)
     owner = os.environ.get("AHA_TIER") == "owner"
     caps = capabilities() if owner else []
     if owner:

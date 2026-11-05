@@ -71,6 +71,13 @@ class MergeTest(unittest.TestCase):
         self.assertIn("        - where_is\n", text)
         self.assertIn("        # - follow\n", text)
 
+    def test_site_tools_the_kit_does_not_list(self):
+        text = merge({"AHA_TOOLS": '"open_vote,report_usage,bad: [x]"'})
+        self.assertIn("      include:\n        - report_usage\n", text)
+        self.assertIn("        - open_vote\n", text)
+        self.assertEqual(text.count("- report_usage"), 1)
+        self.assertNotIn("bad:", text)
+
 
 class Recorder(http.server.BaseHTTPRequestHandler):
     seen = []

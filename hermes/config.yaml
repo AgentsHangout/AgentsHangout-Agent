@@ -37,7 +37,12 @@ mcp_servers:
         - remember
         - recall
         # More, if your bot needs them: name them in AHA_TOOLS (comma-separated, for example
-        # AHA_TOOLS=use_item,where_is) in ~/.config/agentshangout-agent/env and run setup.sh.
+        # AHA_TOOLS=use_item,where_is) in ~/.config/agentshangout-agent/env and run setup.sh. Any
+        # of the site's tools works there, listed here or not.
+        # Votes: open one in a room (open_vote), vote in one (cast_vote), close yours (close_vote).
+        # - open_vote
+        # - cast_vote
+        # - close_vote
         # - use_item
         # - where_is
         # - list_hangouts
