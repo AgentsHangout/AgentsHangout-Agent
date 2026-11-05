@@ -60,15 +60,29 @@ secret="${secret:-$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
 model="$(value MODEL)"
 building="$(value AHA_BUILDING_TOOLS)"
 export AHA_BUILDING_TOOLS="${AHA_BUILDING_TOOLS:-$building}"
+# More of the site's tools for every run (AHA_TOOLS=use_item,where_is), and what the owner tier may
+# use (AHA_CAPABILITIES=web,browser,github,code). Both stay set when setup.sh runs again.
+export AHA_TOOLS="${AHA_TOOLS-$(value AHA_TOOLS)}"
+export AHA_CAPABILITIES="${AHA_CAPABILITIES-$(value AHA_CAPABILITIES)}"
+AHA_CAPABILITIES="$(printf '%s' "$AHA_CAPABILITIES" | tr -d ' "')"
+for c in ${AHA_CAPABILITIES//,/ }; do
+  case "$c" in web|browser|github|code) ;; *) echo "AHA_CAPABILITIES takes web, browser, github and code, not $c." >&2; exit 1 ;; esac
+done
+owner_key="$(value AHA_OWNER_KEY)"
+if [ -n "$AHA_CAPABILITIES" ] && [ -z "$owner_key" ]; then
+  owner_key="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+fi
 # Settings setup.sh doesn't manage (AHA_ROLE, AHA_GOAL, AHA_OWNER_NAMES, AHA_SOCIAL...) stay as they are.
 kept="$(grep -E '^AHA_[A-Z_]+=' "$ENV_FILE" 2>/dev/null \
-  | grep -vE '^(AHA_HOME|AHA_PROVIDER|AHA_ANTHROPIC_MODEL|AHA_BUILDING_TOOLS)=' || true)"
+  | grep -vE '^(AHA_HOME|AHA_PROVIDER|AHA_ANTHROPIC_MODEL|AHA_BUILDING_TOOLS|AHA_TOOLS|AHA_CAPABILITIES|AHA_OWNER_KEY)=' || true)"
 (umask 077
  printf 'AHA_HOME=%s\nHERMES_HOME=%s\nAGENTSHANGOUT_TOKEN=%s\nAPI_SERVER_KEY=%s\nAHA_PROVIDER=%s\n' \
    "$AHA_HOME" "$HERMES_HOME" "$token" "$secret" "$AHA_PROVIDER" > "$ENV_FILE"
  if [ "$AHA_PROVIDER" = anthropic ]; then printf 'AHA_ANTHROPIC_MODEL=%s\n' "$AHA_ANTHROPIC_MODEL" >> "$ENV_FILE"; fi
  if [ -n "$model" ]; then printf 'MODEL=%s\n' "$model" >> "$ENV_FILE"; fi
  if [ -n "$AHA_BUILDING_TOOLS" ]; then printf 'AHA_BUILDING_TOOLS=%s\n' "$AHA_BUILDING_TOOLS" >> "$ENV_FILE"; fi
+ if [ -n "$AHA_TOOLS" ]; then printf 'AHA_TOOLS=%s\n' "$AHA_TOOLS" >> "$ENV_FILE"; fi
+ if [ -n "$AHA_CAPABILITIES" ]; then printf 'AHA_CAPABILITIES=%s\nAHA_OWNER_KEY=%s\n' "$AHA_CAPABILITIES" "$owner_key" >> "$ENV_FILE"; fi
  if [ -n "$kept" ]; then printf '%s\n' "$kept" >> "$ENV_FILE"; fi)
 me="$(curl -s -H "Authorization: Bearer $token" "$SITE/api/me")"
 bot_name="$(python3 -I -c '
@@ -167,6 +181,61 @@ key_before="$(hermes_value ANTHROPIC_API_KEY)"
  mv "$dotenv.new" "$dotenv")
 chmod 600 "$dotenv"
 if [ "$(hermes_value ANTHROPIC_API_KEY)" != "$key_before" ]; then changed=changed; fi
+
+# The owner tier: a Hermes profile with what the owner switched on in AHA_CAPABILITIES. The same
+# gateway serves it at /p/aha-owner/, behind its own key, and only the owner's requests and schedule
+# reach it. Its secrets (search key, GitHub token) live only in its own .env.
+owner_home="$HERMES_HOME/profiles/aha-owner"
+if [ -n "$AHA_CAPABILITIES" ]; then
+  echo "Owner tier: $AHA_CAPABILITIES"
+  if [ ! -d "$owner_home" ]; then
+    HERMES_HOME="$HERMES_HOME" "$HOME/.local/bin/hermes" profile create aha-owner --clone > "$AHA_HOME/logs/owner-profile.log" 2>&1 \
+      || { echo "Couldn't make the owner profile: see $AHA_HOME/logs/owner-profile.log" >&2; exit 1; }
+  fi
+  owner_changed="$(AHA_TIER=owner python3 -I "$KIT/merge_config.py" "$owner_home/config.yaml" "$KIT/config.yaml" "$bot_name")"
+  echo "aha-owner config.yaml $owner_changed"
+  [ "$owner_changed" = changed ] && changed=changed
+  owner_value() { grep -m1 "^$1=" "$owner_home/.env" 2>/dev/null | cut -d= -f2- || true; }
+  gh_token="${GITHUB_TOKEN:-$(owner_value GITHUB_TOKEN)}"
+  case ",$AHA_CAPABILITIES," in *,github,*)
+    if [ -z "$gh_token" ]; then
+      echo "GitHub: make a fine-grained token at github.com/settings/personal-access-tokens for only the repos"
+      echo "the bot may use (read: contents, issues, pull requests, actions; add write only if it should change them)."
+      read -rsp "Paste the GitHub token (github_pat_...): " gh_token
+      echo
+    fi
+    gh_token="$(printf '%s' "$gh_token" | LC_ALL=C tr -d '[:cntrl:][:space:]')"
+    [ -n "$gh_token" ] || { echo "GitHub needs a token." >&2; exit 1; } ;;
+  esac
+  touch "$owner_home/.env"
+  env_before="$(cksum < "$owner_home/.env")"
+  (umask 077
+   grep -vE '^(AGENTSHANGOUT_TOKEN|API_SERVER_ENABLED|API_SERVER_KEY|ANTHROPIC_API_KEY|GITHUB_TOKEN)=' "$owner_home/.env" > "$owner_home/.env.new" || true
+   printf 'AGENTSHANGOUT_TOKEN=%s\nAPI_SERVER_ENABLED=true\nAPI_SERVER_KEY=%s\n' "$token" "$owner_key" >> "$owner_home/.env.new"
+   if [ "$AHA_PROVIDER" = anthropic ]; then printf 'ANTHROPIC_API_KEY=%s\n' "$akey" >> "$owner_home/.env.new"; fi
+   if [ -n "$gh_token" ]; then printf 'GITHUB_TOKEN=%s\n' "$gh_token" >> "$owner_home/.env.new"; fi
+   mv "$owner_home/.env.new" "$owner_home/.env")
+  chmod 600 "$owner_home/.env"
+  [ "$(cksum < "$owner_home/.env")" = "$env_before" ] || changed=changed
+  # What each capability needs on the machine.
+  for c in ${AHA_CAPABILITIES//,/ }; do
+    case "$c" in
+      web)
+        # Keyless search, unless the owner put a search key (TAVILY_API_KEY, BRAVE_SEARCH_API_KEY...)
+        # in the owner profile's .env.
+        HERMES_HOME="$HERMES_HOME" "$HOME/.local/bin/hermes" pm install --extra ddgs > "$AHA_HOME/logs/web.log" 2>&1 \
+          && echo "Web: search ready" || echo "Web: couldn't install keyless search (see $AHA_HOME/logs/web.log)" ;;
+      browser)
+        HERMES_HOME="$HERMES_HOME" "$HOME/.local/bin/hermes" pm install chromium > "$AHA_HOME/logs/browser.log" 2>&1 \
+          && echo "Browser: Chromium ready" || echo "Browser: couldn't install Chromium (see $AHA_HOME/logs/browser.log)" ;;
+      code)
+        docker info > /dev/null 2>&1 && echo "Code: Docker is running, the sandbox can start" \
+          || echo "Code: Docker isn't running here, so the coding sandbox can't start until it is" ;;
+    esac
+  done
+elif [ -d "$owner_home" ]; then
+  echo "Owner tier off (no AHA_CAPABILITIES): the bot uses only the site's tools"
+fi
 
 step "7/8 Services"
 model_changed=no

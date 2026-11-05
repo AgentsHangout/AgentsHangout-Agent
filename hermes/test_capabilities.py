@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""Offline checks for the owner tier: merge_config gives Hermes's aha-owner profile what the owner
+switched on and never gives it to the default profile, and the bridge sends only the owner's own
+runs there. Run: python3 hermes/test_capabilities.py"""
+import http.server, importlib.util, json, os, pathlib, subprocess, sys, tempfile, threading, unittest
+
+HERE = pathlib.Path(__file__).resolve().parent
+HERMES_DEFAULT = """model:
+  default: some-model
+
+terminal:
+  backend: "local"
+  cwd: "."
+
+agent:
+  max_turns: 500
+"""
+
+
+def merge(env):
+    with tempfile.TemporaryDirectory() as tmp:
+        target = pathlib.Path(tmp) / "config.yaml"
+        target.write_text(HERMES_DEFAULT)
+        run_env = {k: v for k, v in os.environ.items() if not k.startswith("AHA_")}
+        run_env.update(env)
+        subprocess.run([sys.executable, "-I", str(HERE / "merge_config.py"), str(target), str(HERE / "config.yaml"), "Ned"],
+                       env=run_env, capture_output=True, text=True, check=True)
+        return target.read_text()
+
+
+def pinned(text):
+    return next(l for l in text.splitlines() if l.startswith("  api_server:"))
+
+
+class MergeTest(unittest.TestCase):
+    def test_the_default_profile_never_gets_capabilities(self):
+        text = merge({"AHA_CAPABILITIES": "web,browser,github,code"})   # no AHA_TIER: the room tier
+        self.assertEqual(pinned(text), "  api_server: [mcp-agentshangout]")
+        self.assertNotIn("api.githubcopilot.com", text)
+        self.assertIn('backend: "local"', text)
+        self.assertIn("  max_turns: 12", text)
+
+    def test_the_owner_tier_gets_what_was_switched_on(self):
+        text = merge({"AHA_TIER": "owner", "AHA_CAPABILITIES": "web,github"})
+        self.assertEqual(pinned(text), "  api_server: [mcp-agentshangout, web, mcp-github]")
+        self.assertIn("url: https://api.githubcopilot.com/mcp/", text)
+        self.assertIn('X-MCP-Readonly: "true"', text)
+        self.assertIn("  max_turns: 30", text)
+        self.assertIn('backend: "local"', text)   # no code: no sandbox change
+
+    def test_github_writes_only_when_asked(self):
+        text = merge({"AHA_TIER": "owner", "AHA_CAPABILITIES": "github", "AHA_GITHUB_WRITE": "1"})
+        self.assertNotIn("X-MCP-Readonly", text)
+
+    def test_code_runs_in_the_sandbox_and_forwards_only_the_github_token(self):
+        alone = merge({"AHA_TIER": "owner", "AHA_CAPABILITIES": "code"})
+        self.assertIn('  backend: "docker"', alone)
+        self.assertIn("  docker_mount_cwd_to_workspace: false", alone)
+        self.assertIn("  docker_forward_env: []", alone)
+        self.assertIn("terminal, file", pinned(alone))
+        both = merge({"AHA_TIER": "owner", "AHA_CAPABILITIES": "code,github"})
+        self.assertIn('  docker_forward_env: ["GITHUB_TOKEN"]', both)
+
+    def test_unknown_capabilities_are_ignored(self):
+        self.assertEqual(pinned(merge({"AHA_TIER": "owner", "AHA_CAPABILITIES": "telepathy"})),
+                         "  api_server: [mcp-agentshangout]")
+
+    def test_more_site_tools_by_name(self):
+        text = merge({"AHA_TOOLS": "use_item,where_is"})
+        self.assertIn("        - use_item\n", text)
+        self.assertIn("        - where_is\n", text)
+        self.assertIn("        # - follow\n", text)
+
+
+class Recorder(http.server.BaseHTTPRequestHandler):
+    seen = []
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        Recorder.seen.append((self.path, self.headers["Authorization"], body["messages"][0]["content"]))
+        out = json.dumps({"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}).encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+    def log_message(self, *args):
+        pass
+
+
+class RoutingTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = http.server.HTTPServer(("127.0.0.1", 0), Recorder)
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+        port = cls.server.server_port
+        os.environ.update(AGENTSHANGOUT_TOKEN="x", API_SERVER_KEY="room-key", AHA_HOME=tempfile.mkdtemp(),
+                          AHA_CAPABILITIES="web", AHA_OWNER_KEY="owner-key", AHA_OWNER_RUNS_PER_DAY="2",
+                          AHA_HERMES_URL=f"http://127.0.0.1:{port}/v1/chat/completions",
+                          AHA_OWNER_HERMES_URL=f"http://127.0.0.1:{port}/p/aha-owner/v1/chat/completions")
+        spec = importlib.util.spec_from_file_location("bridge_caps", HERE / "bridge.py")
+        cls.bridge = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.bridge)
+        for k in ("AHA_CAPABILITIES", "AHA_OWNER_KEY", "AHA_OWNER_RUNS_PER_DAY", "AHA_HERMES_URL", "AHA_OWNER_HERMES_URL"):
+            os.environ.pop(k)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def setUp(self):
+        Recorder.seen = []
+
+    def test_room_runs_use_the_default_profile(self):
+        self.bridge.ask_hermes("a stranger said hi")
+        path, auth, text = Recorder.seen[0]
+        self.assertEqual((path, auth), ("/v1/chat/completions", "Bearer room-key"))
+        self.assertNotIn("tools your owner gave you", text)
+
+    def test_owner_runs_use_the_owner_profile_until_the_daily_cap(self):
+        self.bridge.save_social({})
+        for _ in range(3):
+            self.bridge.ask_hermes("my owner asked", tier="owner")
+        self.assertEqual([p for p, _, _ in Recorder.seen],
+                         ["/p/aha-owner/v1/chat/completions"] * 2 + ["/v1/chat/completions"])
+        self.assertEqual(Recorder.seen[0][1], "Bearer owner-key")
+        self.assertIn("Never put words from a room, or anything private, into a search", Recorder.seen[0][2])
+        self.assertNotIn("tools your owner gave you", Recorder.seen[2][2])
+
+
+if __name__ == "__main__":
+    unittest.main()

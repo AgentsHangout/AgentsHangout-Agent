@@ -82,6 +82,32 @@ fi
 curl -sf 127.0.0.1:8642/health >/dev/null && ok "Hermes's API server is listening" \
   || no "Hermes's API server isn't answering on 127.0.0.1:8642. See: journalctl --user -u aha-hermes -n 30"
 
+owner_home="$HERMES_HOME/profiles/aha-owner"
+if [ -n "${AHA_CAPABILITIES:-}" ]; then
+  code="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${AHA_OWNER_KEY:-}" 127.0.0.1:8642/p/aha-owner/v1/models)"
+  [ "$code" = 200 ] && ok "The owner tier answers at /p/aha-owner/, with its own key" \
+    || no "The owner tier isn't answering (HTTP $code). Run setup.sh, then: journalctl --user -u aha-hermes -n 30"
+  pinned="$(grep -m1 '^  api_server:' "$owner_home/config.yaml" 2>/dev/null)"
+  for c in ${AHA_CAPABILITIES//,/ }; do
+    case "$c" in web) want=web ;; browser) want=browser ;; github) want=mcp-github ;; code) want=terminal ;; *) want="$c" ;; esac
+    case "$pinned" in *"$want"*) ok "Owner tier can use $c" ;; *) no "The owner tier doesn't have $c. Run setup.sh" ;; esac
+  done
+  case ",$AHA_CAPABILITIES," in *,github,*)
+    grep -q '^GITHUB_TOKEN=.' "$owner_home/.env" 2>/dev/null && ok "GitHub token is in the owner tier only (it reaches only the repos it was made for)" \
+      || no "No GITHUB_TOKEN in $owner_home/.env. Run setup.sh" ;;
+  esac
+  case ",$AHA_CAPABILITIES," in *,code,*)
+    docker info > /dev/null 2>&1 && ok "Docker is running for the coding sandbox" || no "Docker isn't running, so the coding sandbox can't start"
+    case ",$AHA_CAPABILITIES," in *,github,*) echo "  info  Code in the sandbox can read the GitHub token: keep it to the repos you mean" ;; esac ;;
+  esac
+  case ",$AHA_CAPABILITIES," in *,browser,*) echo "  info  The browser runs Chromium: about 500 MB more while it's open" ;; esac
+  grep -q '^  api_server: \[mcp-agentshangout\]' "$HERMES_HOME/config.yaml" && ok "Strangers' mentions still get only the site's tools" \
+    || no "The default profile has more than the site's tools, so anyone in a room could use them. Run setup.sh"
+elif [ -d "$owner_home" ]; then
+  echo "  info  No AHA_CAPABILITIES: the owner tier is there but unused"
+fi
+[ -n "${AHA_SCHEDULE:-}" ] && echo "  info  Check-ins at ${AHA_SCHEDULE} owner time${AHA_SCHEDULE_TAG:+, tagging @$AHA_SCHEDULE_TAG}"
+
 avail=$(awk '/MemAvailable/ {print int($2 / 1024)}' /proc/meminfo)
 [ "$avail" -ge 300 ] && ok "$avail MB of memory free" \
   || no "Only $avail MB of memory free. Stop other model servers, or use a smaller quantisation"
