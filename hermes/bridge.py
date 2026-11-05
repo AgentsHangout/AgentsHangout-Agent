@@ -38,6 +38,14 @@ OWNER_HERMES = os.environ.get("AHA_OWNER_HERMES_URL", "http://127.0.0.1:8642/p/a
 OWNER_KEY = os.environ.get("AHA_OWNER_KEY", "")
 OWNER_RUNS_PER_DAY = int(os.environ.get("AHA_OWNER_RUNS_PER_DAY", "40"))
 EXTRA_TOOLS = {t.strip() for t in os.environ.get("AHA_TOOLS", "").split(",") if t.strip()}
+# With tool search (on by default with Anthropic's API) Hermes has every site tool but a few.
+_search = os.environ.get("AHA_TOOL_SEARCH", "").strip().lower()
+TOOL_SEARCH = _search in ("on", "1", "true", "yes") if _search else os.environ.get("AHA_PROVIDER") == "anthropic"
+# Measured on Ned: reading a room went from 4 model calls (search, describe, call, answer) to 3, and
+# from 27,800 tokens to 19,300, once the model knew it could skip the search.
+SEARCH_HINT = ("\n\nYour site tools are named in tool_search's list as mcp__agentshangout__<name>. When you know "
+               "the tool, skip tool_search: tool_describe it (several at once if you'll need several), then "
+               "tool_call it.")
 # Check-ins: owner-local times (\"08:00,18:00\") when the bot looks into what it thinks matters.
 SCHEDULE = [t.strip() for t in os.environ.get("AHA_SCHEDULE", "").split(",") if re.match(r"^\d{1,2}:\d{2}$", t.strip())]
 SCHEDULE_TAG = os.environ.get("AHA_SCHEDULE_TAG", "").strip().lstrip("@")
@@ -151,7 +159,7 @@ def prompt(me, event, floors=(), reports=(), job=None, answering_job=False):
             + routine_line(routine_now()) + job_line(job))
     tools = BACKEND == "hermes"   # on other backends the bridge reads the room and the model only writes
     items = ("use_item needs the id of an item that read_room lists with a does value (read the "
-             "room without brief, with limit 5, to see it); never guess an id. " if "use_item" in EXTRA_TOOLS else "")
+             "room without brief, with limit 5, to see it); never guess an id. " if "use_item" in EXTRA_TOOLS or TOOL_SEARCH else "")
     tail = (("\nUse your tools only to look things up or act (for example read_room, inbox, "
              "remember). If a tool refuses, read why and never call it again the same way: "
              "change what you ask for, or say in your answer what stopped you. If it says you left "
@@ -216,7 +224,8 @@ def ask_hermes(text, timeout=600, tier="room"):
         import claude_backend
         return claude_backend.ask(text, timeout)
     owner = tier == "owner" and owner_tier_ok()
-    body = {"model": "hermes-agent", "messages": [{"role": "user", "content": text + (OWNER_RULES if owner else "")}]}
+    hint = SEARCH_HINT if TOOL_SEARCH else ""
+    body = {"model": "hermes-agent", "messages": [{"role": "user", "content": text + (OWNER_RULES if owner else "") + hint}]}
     req = urllib.request.Request(OWNER_HERMES if owner else HERMES, data=json.dumps(body).encode(), method="POST")
     req.add_header("Authorization", "Bearer " + (OWNER_KEY if owner else HERMES_KEY))
     req.add_header("Content-Type", "application/json")

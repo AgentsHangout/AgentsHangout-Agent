@@ -64,6 +64,11 @@ export AHA_BUILDING_TOOLS="${AHA_BUILDING_TOOLS:-$building}"
 # use (AHA_CAPABILITIES=web,browser,github,code). Both stay set when setup.sh runs again.
 export AHA_TOOLS="${AHA_TOOLS-$(value AHA_TOOLS)}"
 export AHA_CAPABILITIES="${AHA_CAPABILITIES-$(value AHA_CAPABILITIES)}"
+# Tool search (every site tool, loaded when the model looks for it): on by default with Anthropic's
+# API, off with a local model. AHA_TOOL_SEARCH=on or off overrides it.
+export AHA_TOOL_SEARCH="${AHA_TOOL_SEARCH-$(value AHA_TOOL_SEARCH)}"
+AHA_TOOL_SEARCH="$(printf '%s' "$AHA_TOOL_SEARCH" | tr -d ' "')"
+AHA_TOOLS="$(printf '%s' "$AHA_TOOLS" | tr -d ' "')"
 AHA_CAPABILITIES="$(printf '%s' "$AHA_CAPABILITIES" | tr -d ' "')"
 for c in ${AHA_CAPABILITIES//,/ }; do
   case "$c" in web|browser|github|code) ;; *) echo "AHA_CAPABILITIES takes web, browser, github and code, not $c." >&2; exit 1 ;; esac
@@ -74,7 +79,7 @@ if [ -n "$AHA_CAPABILITIES" ] && [ -z "$owner_key" ]; then
 fi
 # Settings setup.sh doesn't manage (AHA_ROLE, AHA_GOAL, AHA_OWNER_NAMES, AHA_SOCIAL...) stay as they are.
 kept="$(grep -E '^AHA_[A-Z_]+=' "$ENV_FILE" 2>/dev/null \
-  | grep -vE '^(AHA_HOME|AHA_PROVIDER|AHA_ANTHROPIC_MODEL|AHA_BUILDING_TOOLS|AHA_TOOLS|AHA_CAPABILITIES|AHA_OWNER_KEY)=' || true)"
+  | grep -vE '^(AHA_HOME|AHA_PROVIDER|AHA_ANTHROPIC_MODEL|AHA_BUILDING_TOOLS|AHA_TOOLS|AHA_TOOL_SEARCH|AHA_CAPABILITIES|AHA_OWNER_KEY)=' || true)"
 (umask 077
  printf 'AHA_HOME=%s\nHERMES_HOME=%s\nAGENTSHANGOUT_TOKEN=%s\nAPI_SERVER_KEY=%s\nAHA_PROVIDER=%s\n' \
    "$AHA_HOME" "$HERMES_HOME" "$token" "$secret" "$AHA_PROVIDER" > "$ENV_FILE"
@@ -82,6 +87,7 @@ kept="$(grep -E '^AHA_[A-Z_]+=' "$ENV_FILE" 2>/dev/null \
  if [ -n "$model" ]; then printf 'MODEL=%s\n' "$model" >> "$ENV_FILE"; fi
  if [ -n "$AHA_BUILDING_TOOLS" ]; then printf 'AHA_BUILDING_TOOLS=%s\n' "$AHA_BUILDING_TOOLS" >> "$ENV_FILE"; fi
  if [ -n "$AHA_TOOLS" ]; then printf 'AHA_TOOLS=%s\n' "$AHA_TOOLS" >> "$ENV_FILE"; fi
+ if [ -n "$AHA_TOOL_SEARCH" ]; then printf 'AHA_TOOL_SEARCH=%s\n' "$AHA_TOOL_SEARCH" >> "$ENV_FILE"; fi
  if [ -n "$AHA_CAPABILITIES" ]; then printf 'AHA_CAPABILITIES=%s\nAHA_OWNER_KEY=%s\n' "$AHA_CAPABILITIES" "$owner_key" >> "$ENV_FILE"; fi
  if [ -n "$kept" ]; then printf '%s\n' "$kept" >> "$ENV_FILE"; fi)
 me="$(curl -s -H "Authorization: Bearer $token" "$SITE/api/me")"

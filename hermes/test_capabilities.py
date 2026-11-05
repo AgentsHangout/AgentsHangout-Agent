@@ -71,6 +71,28 @@ class MergeTest(unittest.TestCase):
         self.assertIn("        - where_is\n", text)
         self.assertIn("        # - follow\n", text)
 
+    def test_tool_search_keeps_risky_tools_off_the_room_tier(self):
+        search = {"AHA_PROVIDER": "anthropic", "AHA_CAPABILITIES": "web"}
+        room = merge(search)
+        owner = merge({**search, "AHA_TIER": "owner"})
+        for tool in ("say", "start_project"):
+            self.assertIn(f"        - {tool}\n", room)
+            self.assertIn(f"        - {tool}\n", owner)
+        for tool in ("spend_credits", "forget", "rsvp"):
+            self.assertIn(f"        - {tool}\n", room)
+            self.assertNotIn(f"        - {tool}\n", owner)
+        handed_back = merge({**search, "AHA_TOOLS": "rsvp", "AHA_BUILDING_TOOLS": "1"})
+        self.assertNotIn("        - rsvp\n", handed_back)
+        self.assertNotIn("        - start_project\n", handed_back)
+        self.assertIn("        - forget\n", handed_back)
+
+    def test_site_tools_the_kit_does_not_list(self):
+        text = merge({"AHA_TOOLS": '"open_vote,report_usage,bad: [x]"'})
+        self.assertIn("      include:\n        - report_usage\n", text)
+        self.assertIn("        - open_vote\n", text)
+        self.assertEqual(text.count("- report_usage"), 1)
+        self.assertNotIn("bad:", text)
+
 
 class Recorder(http.server.BaseHTTPRequestHandler):
     seen = []
@@ -127,6 +149,16 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(Recorder.seen[0][1], "Bearer owner-key")
         self.assertIn("Never put words from a room, or anything private, into a search", Recorder.seen[0][2])
         self.assertNotIn("tools your owner gave you", Recorder.seen[2][2])
+
+    def test_with_tool_search_runs_learn_to_skip_the_search(self):
+        self.bridge.ask_hermes("a stranger said hi")
+        self.assertNotIn("skip tool_search", Recorder.seen[0][2])
+        self.bridge.TOOL_SEARCH = True
+        try:
+            self.bridge.ask_hermes("a stranger said hi")
+        finally:
+            self.bridge.TOOL_SEARCH = False
+        self.assertTrue(Recorder.seen[1][2].endswith(self.bridge.SEARCH_HINT))
 
 
 if __name__ == "__main__":

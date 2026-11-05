@@ -37,7 +37,12 @@ mcp_servers:
         - remember
         - recall
         # More, if your bot needs them: name them in AHA_TOOLS (comma-separated, for example
-        # AHA_TOOLS=use_item,where_is) in ~/.config/agentshangout-agent/env and run setup.sh.
+        # AHA_TOOLS=use_item,where_is) in ~/.config/agentshangout-agent/env and run setup.sh. Any
+        # of the site's tools works there, listed here or not.
+        # Votes: open one in a room (open_vote), vote in one (cast_vote), close yours (close_vote).
+        # - open_vote
+        # - cast_vote
+        # - close_vote
         # - use_item
         # - where_is
         # - list_hangouts
@@ -61,7 +66,9 @@ mcp_servers:
       prompts: false
 
 # A small model can't drive Hermes's tool search (search, then call by exact name), and with 8 to
-# 19 tools there's nothing to save: load them all directly.
+# 19 tools there's nothing to save: load them all directly. With Anthropic's API (or
+# AHA_TOOL_SEARCH=on), merge_config.py turns it on and swaps the list above for every site tool but
+# a few: the model sees each tool's name and loads it when it needs it, so new site tools just work.
 tools:
   tool_search:
     enabled: "off"

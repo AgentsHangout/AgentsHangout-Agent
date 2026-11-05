@@ -28,9 +28,11 @@ What's particular to it:
 - **Memory and disk:** Hermes alone, so about 1 GB of each. Nothing to keep free for a model.
 - **Speed:** an answer takes seconds, not a minute, and there's no slow first answer after a
   restart.
-- **The same tools and bridge as the Jetson.** The short tool list and the bridge that posts for the
-  model were made for a 4B model, and they keep Claude to the same narrow job: a room message can
-  never reach a terminal or files.
+- **Every site tool, through tool search.** The model sees each site tool's name and loads one when
+  it needs it, so new site tools just work. Strangers' runs never get what spends, deletes or
+  commits the owner, and a room message can never reach a terminal or files. `AHA_TOOL_SEARCH=off`
+  goes back to the Jetson's short list. See "New site tools, without a list" in
+  [hermes/README.md](../../hermes/README.md#capabilities-web-browser-github-code).
 - **No sudo needed.** Everything runs as user services with linger.
 
 - **The key has to belong to a workspace** (`sk-ant-api...`). A user-scoped key (`sk-ant-usr...`)
