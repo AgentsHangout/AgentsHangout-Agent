@@ -130,13 +130,15 @@ class Jobs:
         return max(mine, key=lambda j: j["at"]) if mine else None
 
 
-def install_argv(machine, branch):
-    """Clones the kit on the machine (or updates it) and checks out the branch."""
-    if not BRANCH_RE.match(branch) or not PATH_RE.match(machine["kit"]):
+def install_argv(machine, branch=""):
+    """Clones the kit on the machine (or updates it). With a branch, checks that branch out; without,
+    keeps the branch it's on, so updating never moves a machine off the branch it was set up from."""
+    if (branch and not BRANCH_RE.match(branch)) or not PATH_RE.match(machine["kit"]):
         raise ValueError("refused")
     kit = machine["kit"]
+    switch = f"git checkout -q {branch}; " if branch else ""
     script = (f"set -e; if [ ! -d {kit}/.git ]; then git clone -q {REPO} {kit}; fi; cd {kit}; "
-              f"git fetch -q origin; git checkout -q {branch}; git pull -q --ff-only; git log -1 --format='Kit at %h %s'")
+              f"git fetch -q origin; {switch}git pull -q --ff-only; git log -1 --format='Kit at %h %s (%D)'")
     if machine["target"] == "local":
         return ["bash", "-c", script]
     return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", machine["target"], script]
@@ -335,7 +337,8 @@ class App:
                     + field("Short name", "name", "", "Lowercase letters, numbers and dashes: jetson.")
                     + field("SSH target", "target", "", "user@host, as you'd type after ssh (your SSH key must work without a password), or local for this machine.")
                     + field("Kit folder on it", "kit", "~/AgentsHangout-Agent", "Where the kit is, or will be cloned.")
-                    + field("Branch", "branch", "main", "To clone or update the kit. Leave as it is to use what's there.")
+                    + field("Branch", "branch", "", "Empty keeps the branch the kit is on (main when cloning). "
+                            "Name one only to switch the kit to it.")
                     + checks("", "install", [], [("1", "Clone or update the kit there now")])
                     + "<button>Add</button></form>", csrf)
 
@@ -356,7 +359,7 @@ class App:
         actions = (f"<form class=inline method=post action='/m/{esc(name)}/refresh'>{c}<button class=plain>Refresh</button></form>"
                    f"<form class=inline method=post action='/m/{esc(name)}/doctor'>{c}<button class=plain>Run doctor</button></form>"
                    f"<form class=inline method=post action='/m/{esc(name)}/restart'>{c}<button class=plain>Restart the bot</button></form>"
-                   f"<form class=inline method=post action='/m/{esc(name)}/install'>{c}<input type=hidden name=branch value='{esc((st.get('kit') or {}).get('branch') or 'main')}'>"
+                   f"<form class=inline method=post action='/m/{esc(name)}/install'>{c}"
                    "<button class=plain>Update the kit</button></form>")
         parts.append(actions)
         if st.get("error"):
@@ -500,16 +503,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 app.sessions.pop(m.group(1), None)
             return self.redirect("/login", {"Set-Cookie": "aha_manager=; Path=/; Max-Age=0"})
         if path == "/m":
-            name, target, kit, branch = one("name").strip(), one("target").strip(), one("kit").strip() or "~/AgentsHangout-Agent", one("branch").strip() or "main"
+            name, target, kit, branch = one("name").strip(), one("target").strip(), one("kit").strip() or "~/AgentsHangout-Agent", one("branch").strip()
             if not NAME_RE.match(name):
                 return self.send(400, app.new_form(csrf, "Pick a short name: lowercase letters, numbers and dashes."))
             if app.machines.get(name):
                 return self.send(400, app.new_form(csrf, f"There's already a machine called {name}."))
-            if not TARGET_RE.match(target) or not PATH_RE.match(kit) or not BRANCH_RE.match(branch):
+            if not TARGET_RE.match(target) or not PATH_RE.match(kit) or (branch and not BRANCH_RE.match(branch)):
                 return self.send(400, app.new_form(csrf, "That SSH target, folder or branch has characters this page won't pass on."))
             app.machines.put(name, {"target": target, "kit": kit})
             if one("install") == "1":
-                job = app.jobs.start(f"Cloning the kit ({branch})", name, install_argv(app.machines.get(name), branch))
+                job = app.jobs.start(f"Cloning or updating the kit{f' ({branch})' if branch else ''}", name, install_argv(app.machines.get(name), branch))
                 return self.redirect(f"/jobs/{job}")
             return self.redirect(f"/m/{name}")
         m = re.match(r"^/m/([a-z0-9-]+)/(refresh|doctor|restart|install|settings|login|login-finish|remove)$", path)
@@ -522,10 +525,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if action == "doctor":
             return self.redirect(f"/jobs/{app.jobs.start('Doctor', name, argv_for(machine, 'doctor'))}")
         if action == "install":
-            branch = one("branch") or "main"
-            if not BRANCH_RE.match(branch):
+            branch = one("branch").strip()
+            if branch and not BRANCH_RE.match(branch):
                 return self.send(400, page("Refused", "<h1>That branch name won't be passed on.</h1>", csrf))
-            return self.redirect(f"/jobs/{app.jobs.start(f'Updating the kit ({branch})', name, install_argv(machine, branch))}")
+            title = "Updating the kit" + (f" ({branch})" if branch else "")
+            return self.redirect(f"/jobs/{app.jobs.start(title, name, install_argv(machine, branch))}")
         if action == "restart":
             out = call(machine, "restart", timeout=150)
             app.status_cache.pop(name, None)

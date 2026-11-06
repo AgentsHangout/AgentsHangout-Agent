@@ -33,6 +33,12 @@ class ArgvTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             app.install_argv({"target": "h", "kit": "~/k"}, "main; rm -rf ~")
 
+    def test_updating_the_kit_keeps_its_branch_unless_one_is_named(self):
+        keep = app.install_argv({"target": "h", "kit": "~/k"})[-1]
+        self.assertNotIn("git checkout", keep)
+        self.assertIn("git pull -q --ff-only", keep)
+        self.assertIn("git checkout -q wake-server;", app.install_argv({"target": "h", "kit": "~/k"}, "wake-server")[-1])
+
 
 class PageTest(unittest.TestCase):
     @classmethod
