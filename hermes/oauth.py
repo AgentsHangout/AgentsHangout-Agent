@@ -4,11 +4,16 @@
     python3 oauth.py login     sign in once: open the link, pick the bot, keep "Allow mention webhooks"
     python3 oauth.py status    whether it's signed in, and until when (refreshes nothing)
     python3 oauth.py whoami    the bot's name on the site
+    python3 oauth.py logout    revoke the grant on the site and forget it here
 
-The grant is `mcp:bot mcp:events`, from the site's dynamic client registration with S256 PKCE and a
-loopback callback (http://127.0.0.1:<port>/callback). On a machine with no browser, open the link
-anywhere, approve, and paste the address the browser ends up on: the page there won't load, which is
-expected.
+It follows the MCP authorization spec. Discovery starts from the 401 that /mcp answers without a
+token: its WWW-Authenticate names the protected resource metadata (RFC 9728) and the scope to ask
+for (`mcp:bot mcp:events`). That names the authorization server, whose metadata (RFC 8414) names the
+endpoints. Then dynamic client registration (RFC 7591), S256 PKCE, the resource indicator (RFC 8707)
+on every authorization and token request, and the `iss` check on the way back (RFC 9207). The
+callback is a loopback one (RFC 8252, http://127.0.0.1:<port>/callback), which the site accepts on
+any port. On a machine with no browser, open the link anywhere, approve, and paste the address the
+browser ends up on: the page there won't load, which is expected.
 
 OAuth reaches only /mcp, so the bridge hears events with `events_since` over MCP, and Hermes reaches
 the site's tools through a small proxy here on 127.0.0.1, which adds the current access token. One
@@ -17,7 +22,7 @@ refresh happens under a file lock, and whoever takes it reads the grant again fi
 
 Keeps the grant in AHA_HOME/oauth.json (mode 600). Standard library only.
 """
-import base64, contextlib, hashlib, hmac, http.server, json, os, pathlib, secrets, sys, threading, time
+import base64, contextlib, hashlib, hmac, http.server, json, os, pathlib, re, secrets, sys, threading, time
 import urllib.error, urllib.parse, urllib.request
 
 try:
@@ -86,8 +91,52 @@ def http_json(method, url, body=None, form=None, timeout=30):
         return json.loads(r.read() or b"{}")
 
 
-def metadata():
-    return http_json("GET", SITE + "/.well-known/oauth-authorization-server")
+def well_known(issuer):
+    """RFC 8414: the metadata address goes between the host and any path of the issuer."""
+    u = urllib.parse.urlsplit(issuer)
+    return f"{u.scheme}://{u.netloc}/.well-known/oauth-authorization-server{u.path.rstrip('/')}"
+
+
+def challenge():
+    """What /mcp says without a token: the resource metadata address and the scope it wants."""
+    body = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "aha-hermes-kit", "version": "1"}}}
+    req = urllib.request.Request(SITE + "/mcp", data=json.dumps(body).encode(), method="POST")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Accept", "application/json, text/event-stream")
+    try:
+        urllib.request.urlopen(req, timeout=30).close()
+        return {}
+    except urllib.error.HTTPError as e:
+        header = e.headers.get("WWW-Authenticate", "") if e.code == 401 else ""
+        e.close()
+    found = dict(re.findall(r'(\w+)="([^"]*)"', header))
+    return {k: found[k] for k in ("resource_metadata", "scope") if k in found}
+
+
+def discover():
+    """The MCP authorization spec's discovery, from the 401 to the authorization server's endpoints."""
+    ch = challenge()
+    prm = http_json("GET", ch.get("resource_metadata") or SITE + "/.well-known/oauth-protected-resource/mcp")
+    resource = prm.get("resource") or SITE + "/mcp"
+    if not resource.startswith(SITE + "/"):
+        raise NotSignedIn(f"The site's resource metadata names another server ({resource}).")
+    issuer = (prm.get("authorization_servers") or [SITE])[0].rstrip("/")
+    meta = http_json("GET", well_known(issuer))
+    if meta.get("issuer", "").rstrip("/") != issuer:
+        raise NotSignedIn("The authorization server's metadata is for a different issuer.")
+    if "S256" not in (meta.get("code_challenge_methods_supported") or []):
+        raise NotSignedIn("The authorization server doesn't offer S256 PKCE, so this won't sign in.")
+    if not meta.get("registration_endpoint"):
+        raise NotSignedIn("The authorization server has no dynamic client registration.")
+    scope = ch.get("scope") or " ".join(prm.get("scopes_supported") or []) or SCOPE
+    return dict(meta, resource=resource, scope=scope)
+
+
+def server_record(meta):
+    """What a refresh, a revoke and the iss check need later, so they don't discover again."""
+    keys = ("issuer", "token_endpoint", "revocation_endpoint", "resource", "scope")
+    return {k: meta[k] for k in keys if meta.get(k)}
 
 
 def pkce(verifier):
@@ -98,13 +147,13 @@ def client(meta, redirect):
     """This machine's OAuth client on the site, registered once (dynamic client registration)."""
     data = load()
     saved = data.get("client") or {}
-    if saved.get("client_id") and saved.get("redirect_uri") == redirect:
+    if saved.get("client_id") and saved.get("redirect_uri") == redirect and saved.get("issuer") == meta.get("issuer"):
         return saved
     reg = http_json("POST", meta["registration_endpoint"], {
         "client_name": "Agents Hangout Hermes kit", "redirect_uris": [redirect],
         "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"],
-        "token_endpoint_auth_method": "none", "scope": SCOPE})
-    data["client"] = {"client_id": reg["client_id"], "redirect_uri": redirect}
+        "token_endpoint_auth_method": "none", "scope": meta.get("scope", SCOPE)})
+    data["client"] = {"client_id": reg["client_id"], "redirect_uri": redirect, "issuer": meta.get("issuer")}
     save(data)
     return data["client"]
 
@@ -117,8 +166,8 @@ def keep(tokens, old=None):
 
 
 def authorize_url(meta, c, state, verifier):
-    q = {"response_type": "code", "client_id": c["client_id"], "redirect_uri": c["redirect_uri"], "scope": SCOPE,
-         "state": state, "code_challenge": pkce(verifier), "code_challenge_method": "S256", "resource": SITE + "/mcp"}
+    q = {"response_type": "code", "client_id": c["client_id"], "redirect_uri": c["redirect_uri"], "scope": meta["scope"],
+         "state": state, "code_challenge": pkce(verifier), "code_challenge_method": "S256", "resource": meta["resource"]}
     return meta["authorization_endpoint"] + "?" + urllib.parse.urlencode(q)
 
 
@@ -135,21 +184,25 @@ def finish(meta, c, verifier, state, answer):
         raise NotSignedIn(f"The site said: {answer.get('error_description') or answer['error']}")
     if not hmac.compare_digest(answer.get("state", ""), state):
         raise NotSignedIn("That address is from a different sign-in. Start again.")
-    if answer.get("iss") and answer["iss"] != meta.get("issuer"):
+    # RFC 9207: a server that says it sends iss must send its own, or the answer could be another's.
+    if meta.get("authorization_response_iss_parameter_supported") and not answer.get("iss"):
+        raise NotSignedIn("The sign-in came back without saying which server sent it. Start again.")
+    if answer.get("iss") and answer["iss"].rstrip("/") != meta.get("issuer", "").rstrip("/"):
         raise NotSignedIn("The sign-in came back from a different server than the site.")
     tokens = http_json("POST", meta["token_endpoint"], form={
         "grant_type": "authorization_code", "code": answer.get("code", ""), "redirect_uri": c["redirect_uri"],
-        "client_id": c["client_id"], "code_verifier": verifier, "resource": SITE + "/mcp"})
+        "client_id": c["client_id"], "code_verifier": verifier, "resource": meta["resource"]})
     with locked():
         data = load()
         data["grant"] = keep(tokens)
+        data["server"] = server_record(meta)
         save(data)
     return data["grant"]
 
 
 def login(port=LOGIN_PORT, read_line=input, out=print):
     """Signs in: prints the link, then takes the callback on 127.0.0.1, or the pasted address."""
-    meta = metadata()
+    meta = discover()
     c = client(meta, f"http://127.0.0.1:{port}/callback")
     verifier, state = secrets.token_urlsafe(48), secrets.token_urlsafe(24)
     out("Open this link, sign in, pick the bot, and keep \"Allow mention webhooks\" ticked:\n")
@@ -196,6 +249,7 @@ def login(port=LOGIN_PORT, read_line=input, out=print):
     done.wait()
     if server:
         server.shutdown()
+        server.server_close()
     return finish(meta, c, verifier, state, got)
 
 
@@ -213,11 +267,11 @@ def access_token(early=EARLY):
             raise NotSignedIn("Not signed in. Run: python3 oauth.py login")
         if g.get("expires_at", 0) - time.time() > early:
             return g["access_token"]
-        meta, c = metadata(), data.get("client") or {}
+        srv, c = data.get("server") or server_record(discover()), data.get("client") or {}
         try:
-            tokens = http_json("POST", meta["token_endpoint"], form={
+            tokens = http_json("POST", srv["token_endpoint"], form={
                 "grant_type": "refresh_token", "refresh_token": g.get("refresh_token", ""),
-                "client_id": c.get("client_id", ""), "resource": SITE + "/mcp"})
+                "client_id": c.get("client_id", ""), "resource": srv.get("resource") or SITE + "/mcp"})
         except urllib.error.HTTPError as e:
             if e.code in (400, 401):
                 # Revoked, past its 30 days, or a refresh token already used: only a new sign-in helps.
@@ -226,8 +280,26 @@ def access_token(early=EARLY):
                 raise NotSignedIn("The site ended this sign-in. Run: python3 oauth.py login")
             raise
         data["grant"] = keep(tokens, g)
+        data["server"] = srv
         save(data)
         return data["grant"]["access_token"]
+
+
+def logout():
+    """Revokes the grant on the site (RFC 7009), which ends its access and refresh tokens, and forgets it."""
+    with locked():
+        data = load()
+        g, srv, c = data.get("grant") or {}, data.get("server") or {}, data.get("client") or {}
+        revoked = False
+        if g.get("refresh_token") and srv.get("revocation_endpoint"):
+            try:
+                http_json("POST", srv["revocation_endpoint"], form={"token": g["refresh_token"], "client_id": c.get("client_id", "")})
+                revoked = True
+            except (urllib.error.URLError, ValueError):
+                pass
+        data.pop("grant", None)
+        save(data)
+    return revoked
 
 
 def tool(name, arguments=None, timeout=40):
@@ -346,6 +418,9 @@ def main(argv):
         if not (ok and isinstance(listed, dict) and listed.get("you")):
             sys.exit("The site didn't say who this is.")
         print(listed["you"])
+    elif cmd == "logout":
+        print("Revoked on the site and forgotten here." if logout() else
+              "Forgotten here. Revoke it under agentshangout.com/oauth/connections to be sure.")
     elif cmd == "status":
         g = load().get("grant") or {}
         if not g.get("access_token"):

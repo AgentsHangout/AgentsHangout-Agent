@@ -32,6 +32,10 @@ class Site(http.server.BaseHTTPRequestHandler):
     tool_calls = []
     used_refresh = set()
     mcp_status = 200
+    registered = []
+    revoked = []
+    pkce_methods = ["S256"]
+    challenge_scope = "mcp:bot mcp:events"
 
     def log_message(self, *a):
         pass
@@ -48,15 +52,34 @@ class Site(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         base = f"http://127.0.0.1:{self.server.server_port}"
+        if self.path == "/.well-known/oauth-protected-resource/mcp":
+            return self.send({"resource": base + "/mcp", "authorization_servers": [base],
+                              "scopes_supported": ["mcp:bot", "mcp:events"], "bearer_methods_supported": ["header"]})
         if self.path == "/.well-known/oauth-authorization-server":
             return self.send({"issuer": base, "authorization_endpoint": base + "/oauth/authorize",
-                              "token_endpoint": base + "/oauth/token", "registration_endpoint": base + "/oauth/register"})
+                              "token_endpoint": base + "/oauth/token", "registration_endpoint": base + "/oauth/register",
+                              "revocation_endpoint": base + "/oauth/revoke", "code_challenge_methods_supported": Site.pkce_methods,
+                              "authorization_response_iss_parameter_supported": True})
         self.send({}, 404)
 
     def do_POST(self):
         raw = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        base = f"http://127.0.0.1:{self.server.server_port}"
         if self.path == "/oauth/register":
+            Site.registered.append(json.loads(raw))
             return self.send({"client_id": "client-1", **json.loads(raw)})
+        if self.path == "/oauth/revoke":
+            Site.revoked.append({k: v[0] for k, v in urllib.parse.parse_qs(raw.decode()).items()})
+            return self.send({})
+        if self.path.startswith("/mcp") and not self.headers.get("Authorization"):
+            # The MCP challenge: where the resource metadata is, and what scope to ask for.
+            body = b'{"error":"missing or invalid credentials"}'
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", f'Bearer resource_metadata="{base}/.well-known/oauth-protected-resource/mcp", scope="{Site.challenge_scope}"')
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path == "/oauth/token":
             f = {k: v[0] for k, v in urllib.parse.parse_qs(raw.decode()).items()}
             if f["grant_type"] == "authorization_code":
@@ -106,11 +129,15 @@ class OAuthTest(unittest.TestCase):
         Site.tool_calls.clear()
         Site.used_refresh.clear()
         Site.mcp_status = 200
+        Site.registered.clear()
+        Site.revoked.clear()
+        Site.pkce_methods = ["S256"]
+        Site.challenge_scope = "mcp:bot mcp:events"
 
     def tearDown(self):
         oauth.SITE, oauth.HOME = self.old
 
-    def sign_in(self, via="callback", state=None):
+    def sign_in(self, via="callback", state=None, iss=True):
         port = free_port()
         printed, done, result = [], threading.Event(), {}
         pasted = threading.Event()
@@ -129,19 +156,25 @@ class OAuthTest(unittest.TestCase):
                 result["error"] = e
             done.set()
         threading.Thread(target=run, daemon=True).start()
+        link = None
         for _ in range(100):
             link = next((p for p in printed if p.startswith(self.url + "/oauth/authorize")), None)
-            if link:
+            if link or done.is_set():
                 break
             time.sleep(0.05)
+        if not link:
+            done.wait(10)
+            return result
         q = {k: v[0] for k, v in urllib.parse.parse_qs(urllib.parse.urlsplit(link).query).items()}
+        result["query"] = q
         Site.challenge = q["code_challenge"]
-        self.assertEqual(q["scope"], "mcp:bot mcp:events")
         self.assertEqual(q["code_challenge_method"], "S256")
         self.assertEqual(q["redirect_uri"], f"http://127.0.0.1:{port}/callback")
-        self.assertEqual(q["resource"], self.url + "/mcp")
-        back = f"http://127.0.0.1:{port}/callback?" + urllib.parse.urlencode(
-            {"code": "good-code", "state": state or q["state"], "iss": self.url})
+        self.assertEqual(q["resource"], self.url + "/mcp")      # from the resource metadata
+        answer = {"code": "good-code", "state": state or q["state"]}
+        if iss:
+            answer["iss"] = self.url
+        back = f"http://127.0.0.1:{port}/callback?" + urllib.parse.urlencode(answer)
         if via == "callback":
             urllib.request.urlopen(back, timeout=5).read()
         else:
@@ -163,6 +196,38 @@ class OAuthTest(unittest.TestCase):
     def test_signing_in_by_pasting_the_address(self):
         result = self.sign_in("paste")
         self.assertEqual(result["grant"]["access_token"], "a1")
+
+    def test_discovery_follows_the_mcp_challenge(self):
+        result = self.sign_in("callback")
+        self.assertEqual(result["query"]["scope"], "mcp:bot mcp:events")   # the scope the 401 named
+        self.assertEqual(Site.registered[0]["redirect_uris"], [result["query"]["redirect_uri"]])
+        self.assertEqual(Site.registered[0]["token_endpoint_auth_method"], "none")
+        server = oauth.load()["server"]
+        self.assertEqual(server["resource"], self.url + "/mcp")
+        self.assertEqual(server["revocation_endpoint"], self.url + "/oauth/revoke")
+
+    def test_it_asks_for_the_scope_the_challenge_names(self):
+        Site.challenge_scope = "mcp:bot"
+        self.assertEqual(self.sign_in("callback")["query"]["scope"], "mcp:bot")
+
+    def test_an_answer_without_iss_is_refused(self):
+        result = self.sign_in("paste", iss=False)       # the server says it always sends iss (RFC 9207)
+        self.assertIsInstance(result.get("error"), oauth.NotSignedIn)
+        self.assertNotIn("grant", oauth.load())
+
+    def test_no_s256_no_sign_in(self):
+        Site.pkce_methods = ["plain"]
+        result = self.sign_in("callback")
+        self.assertIsInstance(result.get("error"), oauth.NotSignedIn)
+        self.assertIn("S256", str(result["error"]))
+
+    def test_logout_revokes_on_the_site(self):
+        self.sign_in("callback")
+        self.assertTrue(oauth.logout())
+        self.assertEqual(Site.revoked, [{"token": "r1", "client_id": "client-1"}])
+        self.assertNotIn("grant", oauth.load())
+        with self.assertRaises(oauth.NotSignedIn):
+            oauth.access_token()
 
     def test_an_address_from_another_sign_in_is_refused(self):
         result = self.sign_in("paste", state="someone-elses")

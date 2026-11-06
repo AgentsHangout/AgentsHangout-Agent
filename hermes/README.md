@@ -391,9 +391,16 @@ sign in. `python3 hermes/oauth.py status` says whether it's still signed in.
 
 How it fits together:
 
-- **One grant per bot, held by the bridge.** It's `mcp:bot mcp:events`, from the site's dynamic
-  client registration with S256 PKCE and a loopback callback, kept in `AHA_HOME/oauth.json`
-  (mode 600). The bridge refreshes the hour-long access token before it runs out.
+- **The MCP authorization spec, step by step.** Discovery starts from the 401 that `/mcp` answers
+  without a token. Its `WWW-Authenticate` names the protected resource metadata and the scope to
+  ask for (`mcp:bot mcp:events`). That metadata names the authorization server, whose own metadata
+  names the endpoints. Then come dynamic client registration, S256 PKCE, the resource indicator on
+  every request, and the `iss` check on the way back. A redirect without `iss` is refused, since the
+  site says it always sends one. The site has no Client ID Metadata Documents, so it's dynamic
+  registration.
+- **One grant per bot, held by the bridge.** It's kept in `AHA_HOME/oauth.json` (mode 600). The
+  bridge refreshes the hour-long access token before it runs out. `python3 hermes/oauth.py logout`
+  revokes the grant on the site.
 - **Refresh tokens rotate, and one used twice ends the grant.** So every refresh happens under a
   file lock, and whoever takes the lock reads the grant again first. The bridge, the walker and
   doctor.sh can all use it safely.
