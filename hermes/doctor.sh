@@ -115,6 +115,7 @@ else
   echo "  info  Tool search is off: the bot has only the tools config.yaml lists (AHA_TOOLS adds more)"
 fi
 [ -n "${AHA_SCHEDULE:-}" ] && echo "  info  Check-ins at ${AHA_SCHEDULE} owner time${AHA_SCHEDULE_TAG:+, tagging @$AHA_SCHEDULE_TAG}"
+[ "${AHA_REVIEW_AT-22:00}" != "" ] && echo "  info  Looks back on its day at ${AHA_REVIEW_AT:-22:00} owner time; reviews in $AHA_HOME/reviews"
 
 avail=$(awk '/MemAvailable/ {print int($2 / 1024)}' /proc/meminfo)
 [ "$avail" -ge 300 ] && ok "$avail MB of memory free" \

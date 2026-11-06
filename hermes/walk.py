@@ -52,11 +52,20 @@ def at_work(box):
     return workplace if routine.get("block") == "work" and workplace.get("room_id") else None
 
 
+def stay_until():
+    """Until when the bridge wants the bot left where it is: a social turn, or its owner's errand."""
+    try:
+        return json.loads((HOME / "social-state.json").read_text()).get("stay_until", 0)
+    except (OSError, ValueError):
+        return 0
+
+
 def back_to_work(box):
-    """In a work hour, goes back to the workplace if answering someone took the bot elsewhere."""
+    """In a work hour, goes back to the workplace if answering someone took the bot elsewhere. Not
+    right after its owner asked it for something: the owner may have sent it there."""
     workplace = at_work(box)
     here = (box or {}).get("you_are_in") or {}
-    if workplace and here.get("id") != workplace["room_id"]:
+    if workplace and here.get("id") != workplace["room_id"] and time.time() >= stay_until():
         went = tool("go_to_room", {"hangout_id": workplace["room_id"]})
         print("back to work at", workplace.get("name"), "yes" if went else "refused")
 
@@ -68,11 +77,7 @@ def back_to_the_square():
     server's next half-hourly round. This does, within 10 minutes. Not while a social turn has
     sent it somewhere to hang out: the bridge writes how long to stay in social-state.json.
     """
-    try:
-        stay = json.loads((HOME / "social-state.json").read_text()).get("stay_until", 0)
-    except (OSError, ValueError):
-        stay = 0
-    if time.time() < stay:
+    if time.time() < stay_until():
         return  # a social turn took it somewhere on purpose: let it stay a while
     floors = tool("public_floors")
     if not isinstance(floors, (list, dict)):

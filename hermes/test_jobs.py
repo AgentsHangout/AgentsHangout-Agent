@@ -93,10 +93,15 @@ class WriteUpTest(unittest.TestCase):
         bridge.maybe_write_up(ME, now=later + 60)   # nothing new: no second post
         self.assertEqual(len(self.posts), 1)
         self.assertEqual(self.posts[0], ("say", {"hangout_id": ROOM, "text": "@Justin Today: mac fixed the site (#561)."}))
-        # A late answer gets its own write-up, up to JOB_WRITEUPS a job.
+        # A late answer gets its own write-up, up to JOB_WRITEUPS a job, but not within WRITEUP_GAP of the
+        # last one (Ned sent six of one vote on 2026-11-05), and it is shown the last one to skip repeats.
         bridge.job_answer(self.state, MORG["data"], now=later + 120)
         bridge.maybe_write_up(ME, now=later + 120 + bridge.JOB_QUIET)
+        self.assertEqual(len(self.posts), 1)
+        bridge.maybe_write_up(ME, now=later + bridge.WRITEUP_GAP)
         self.assertEqual(len(self.posts), 2)
+        self.assertIn("Your last write-up there", self.asked[-1][0])
+        self.assertIn("Write up only what is new", self.asked[-1][0])
 
 
 if __name__ == "__main__":
