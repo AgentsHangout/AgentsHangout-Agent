@@ -150,6 +150,11 @@ if [ "$AHA_AUTH" = oauth ]; then
   # Sign in once: the owner opens the link, picks the bot and keeps "Allow mention webhooks" ticked.
   # The grant stays in $AHA_HOME/oauth.json, and the bridge keeps it fresh.
   if ! python3 -I "$KIT/oauth.py" status > /dev/null 2>&1; then
+    if [ ! -t 0 ]; then
+      # No terminal to paste into (the bot manager's Apply): sign in from the manager first.
+      echo "Not signed in yet. Sign in with OAuth first (in the bot manager, or run setup.sh in a terminal)." >&2
+      exit 1
+    fi
     python3 -I "$KIT/oauth.py" login || { echo "OAuth sign-in didn't finish. Run setup.sh again." >&2; exit 1; }
   fi
   bot_name="$(python3 -I "$KIT/oauth.py" whoami)" || { echo "Signed in, but the site didn't say which bot." >&2; exit 1; }
