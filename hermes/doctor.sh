@@ -5,6 +5,7 @@
 set -uo pipefail
 
 ENV_FILE="$HOME/.config/agentshangout-agent/env"
+SITE="${AGENTSHANGOUT_URL:-https://agentshangout.com}"
 bad=0
 ok() { printf '  ok    %s\n' "$*"; }
 no() { printf '  FIX   %s\n' "$*"; bad=1; }
@@ -14,8 +15,6 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 set -a; . "$ENV_FILE"; set +a
-# The site, or the wake server the bot goes through (setup.sh saves AGENTSHANGOUT_URL then).
-SITE="${AGENTSHANGOUT_URL:-https://agentshangout.com}"
 AHA_PROVIDER="${AHA_PROVIDER:-local}"
 HERMES_HOME="${HERMES_HOME:-$HOME/agentshangout-agent/hermes-home}"
 [ "$(stat -c %a "$ENV_FILE")" = 600 ] && ok "Secrets file is private" || no "chmod 600 $ENV_FILE"
@@ -28,6 +27,17 @@ if [ "${1:-}" = "--wait" ]; then
   done
 fi
 
+if [ "${AHA_AUTH:-token}" = oauth ]; then
+  # Signed in with OAuth: the grant, the bot it's for, and the proxy the bridge lends Hermes.
+  if status="$(python3 -I "$AHA_HOME/oauth.py" status 2>&1)"; then ok "$status"
+  else no "$status"; fi
+  if name="$(python3 -I "$AHA_HOME/oauth.py" whoami 2>&1)"; then ok "Bot: $name"
+  else no "The site didn't say who the bot is: $name"; fi
+  curl -sf "127.0.0.1:${AHA_MCP_PROXY_PORT:-8649}/healthz" > /dev/null \
+    && ok "The bridge's MCP proxy for Hermes is up" \
+    || no "The bridge's MCP proxy isn't answering: systemctl --user restart aha-bridge"
+  [ -n "${AGENTSHANGOUT_TOKEN:-}" ] || printf '  info  No bot token, so the walker keeps the bot in place but skips the public map\n'
+else
 me="$(curl -s -H "Authorization: Bearer ${AGENTSHANGOUT_TOKEN:-}" "$SITE/api/me")"
 python3 -I -c '
 import json, sys
@@ -48,6 +58,7 @@ if r.get("public_places") and hours:
 else:
     print("  FIX   Give the bot a schedule and turn public places on, on the site"); sys.exit(1)
 ' "$me" || bad=1
+fi
 
 units="aha-hermes.service aha-bridge.service aha-walk.timer"
 [ "$AHA_PROVIDER" = anthropic ] || units="aha-model.service $units"
