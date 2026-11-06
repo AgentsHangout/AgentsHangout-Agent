@@ -200,6 +200,33 @@ def finish(meta, c, verifier, state, answer):
     return data["grant"]
 
 
+PENDING_SECONDS = 900
+
+
+def start_login(port=LOGIN_PORT):
+    """The first half of a sign-in from another machine (the manager UI): returns the link, and keeps
+    what the second half needs in oauth.json for 15 minutes."""
+    meta = discover()
+    c = client(meta, f"http://127.0.0.1:{port}/callback")
+    verifier, state = secrets.token_urlsafe(48), secrets.token_urlsafe(24)
+    with locked():
+        data = load()
+        data["pending"] = {"verifier": verifier, "state": state, "meta": meta, "at": time.time()}
+        save(data)
+    return authorize_url(meta, c, state, verifier)
+
+
+def finish_login(address):
+    """The second half: the address the browser ended up on. Returns the grant."""
+    with locked():
+        data = load()
+        pending = data.pop("pending", None)
+        save(data)
+    if not pending or time.time() - pending.get("at", 0) > PENDING_SECONDS:
+        raise NotSignedIn("That sign-in expired. Start it again.")
+    return finish(pending["meta"], data.get("client") or {}, pending["verifier"], pending["state"], parse_redirect(address))
+
+
 def login(port=LOGIN_PORT, read_line=input, out=print):
     """Signs in: prints the link, then takes the callback on 127.0.0.1, or the pasted address."""
     meta = discover()

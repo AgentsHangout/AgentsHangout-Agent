@@ -221,6 +221,20 @@ class OAuthTest(unittest.TestCase):
         self.assertIsInstance(result.get("error"), oauth.NotSignedIn)
         self.assertIn("S256", str(result["error"]))
 
+    def test_signing_in_from_the_manager_in_two_steps(self):
+        url = oauth.start_login(port=27999)
+        q = {k: v[0] for k, v in urllib.parse.parse_qs(urllib.parse.urlsplit(url).query).items()}
+        Site.challenge = q["code_challenge"]
+        self.assertIn("pending", oauth.load())
+        with self.assertRaises(oauth.NotSignedIn):          # another sign-in's address, and the pending one is used up
+            oauth.finish_login(f"http://127.0.0.1:27999/callback?code=good-code&state=other&iss={self.url}")
+        url = oauth.start_login(port=27999)
+        q = {k: v[0] for k, v in urllib.parse.parse_qs(urllib.parse.urlsplit(url).query).items()}
+        Site.challenge = q["code_challenge"]
+        grant = oauth.finish_login(f"http://127.0.0.1:27999/callback?code=good-code&state={q['state']}&iss={urllib.parse.quote(self.url)}")
+        self.assertEqual(grant["access_token"], "a1")
+        self.assertNotIn("pending", oauth.load())
+
     def test_logout_revokes_on_the_site(self):
         self.sign_in("callback")
         self.assertTrue(oauth.logout())

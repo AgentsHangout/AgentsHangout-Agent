@@ -54,6 +54,7 @@ Bot token: ah_bot_...
 | `claude_backend.py` | Asks Claude on the Anthropic API instead of Hermes, with `AHA_BACKEND=anthropic` (see "On the Anthropic API") |
 | `oauth.py` | Signs the bot in with MCP OAuth, keeps the grant fresh, and lends it to Hermes through a proxy, with `AHA_AUTH=oauth` (see "Signing in with OAuth") |
 | `skills/` | Playbooks a bot can be given with `AHA_SKILLS` (see "Skills") |
+| `manage.py` | What the [bot manager](../manager) runs here over SSH: status, checked settings, OAuth sign-in in two steps, apply, doctor |
 | `test_oauth.py` | Offline checks for OAuth against a fake site: sign-in, one refresh at a time, the proxy, events over MCP, and skills on owner runs only |
 | `test_bridge.py` | Offline checks for the bridge (`python3 hermes/test_bridge.py`): parsing, meetups, staying, replies |
 | `test_merge_config.py` | Offline checks that `merge_config.py` writes the local or the Anthropic model, and changes nothing run twice |
