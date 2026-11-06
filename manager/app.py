@@ -19,7 +19,10 @@ PASSWORD = os.environ.get("MANAGER_PASSWORD", "")
 LISTEN = os.environ.get("MANAGER_LISTEN", "127.0.0.1:8660")
 REPO = "https://github.com/AgentsHangout/AgentsHangout-Agent.git"
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
-TARGET_RE = re.compile(r"^(local|([A-Za-z0-9._-]+@)?[A-Za-z0-9.:_-]+)$")
+# user@host for SSH (never starting with "-", which ssh would read as an option), wsl:<distro> for
+# WSL on the machine running this page, or local.
+TARGET_RE = re.compile(r"^(local|wsl:[A-Za-z0-9._-]{1,40}|([A-Za-z0-9_][A-Za-z0-9._-]*@)?[A-Za-z0-9][A-Za-z0-9.:_-]*)$")
+INSTANCE_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,29}$")
 PATH_RE = re.compile(r"^[A-Za-z0-9._/~:-]+$")
 BRANCH_RE = re.compile(r"^[A-Za-z0-9._/-]{1,80}$")
 COMMANDS = ("status", "set", "apply", "doctor", "restart", "login-start", "login-finish")
@@ -62,16 +65,28 @@ class Machines:
             self.path.write_text(json.dumps(data, indent=2))
 
 
+def shell_on(machine, script):
+    """argv that runs a shell line on the machine: over SSH, in WSL, or here."""
+    target = machine["target"]
+    if target == "local":
+        return ["bash", "-lc", script]
+    if target.startswith("wsl:"):
+        return ["wsl.exe", "-d", target[4:], "-e", "bash", "-lc", script]
+    return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "--", target, script]
+
+
 def argv_for(machine, cmd):
-    """The command that runs manage.py on the machine. Only fixed words reach the remote shell; what
-    the owner types goes on stdin."""
-    if cmd not in COMMANDS or not PATH_RE.match(machine["kit"]) or not TARGET_RE.match(machine["target"]):
+    """The command that runs manage.py on the machine, for its bot (instance) if it has one. Only
+    fixed words reach the remote shell; what the owner types goes on stdin."""
+    instance = machine.get("instance") or ""
+    if (cmd not in COMMANDS or not PATH_RE.match(machine["kit"]) or not TARGET_RE.match(machine["target"])
+            or (instance and not INSTANCE_RE.match(instance))):
         raise ValueError("refused")
+    which = ["--instance", instance] if instance else []
     if machine["target"] == "local":
         kit = pathlib.Path(os.path.expanduser(machine["kit"]))
-        return [sys.executable, "-I", str(kit / "hermes" / "manage.py"), cmd]
-    return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", machine["target"],
-            f"python3 -I {machine['kit']}/hermes/manage.py {cmd}"]
+        return [sys.executable, "-I", str(kit / "hermes" / "manage.py"), *which, cmd]
+    return shell_on(machine, f"python3 -I {machine['kit']}/hermes/manage.py {' '.join(which + [cmd])}")
 
 
 def call(machine, cmd, payload=None, timeout=90):
@@ -139,9 +154,9 @@ def install_argv(machine, branch=""):
     switch = f"git checkout -q {branch}; " if branch else ""
     script = (f"set -e; if [ ! -d {kit}/.git ]; then git clone -q {REPO} {kit}; fi; cd {kit}; "
               f"git fetch -q origin; {switch}git pull -q --ff-only; git log -1 --format='Kit at %h %s (%D)'")
-    if machine["target"] == "local":
-        return ["bash", "-c", script]
-    return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", machine["target"], script]
+    if not TARGET_RE.match(machine["target"]):
+        raise ValueError("refused")
+    return shell_on(machine, script)
 
 
 # ---- The page --------------------------------------------------------------------------------------
@@ -325,7 +340,8 @@ class App:
                         f"<div class=row><span class=quiet>Last run</span><span>{ago(last)}</span></div>")
             title = st.get("bot") or name
             cards.append(f"<div class=card><h3><a href='/m/{esc(name)}'>{esc(title)}</a></h3>"
-                         f"<div class=quiet style='font-size:13px'>{esc(name)} · {esc(m['target'])}</div>{body}</div>")
+                         f"<div class=quiet style='font-size:13px'>{esc(name)} · {esc(m['target'])}"
+                         + (f" · bot {esc(m['instance'])}" if m.get("instance") else "") + f"</div>{body}</div>")
         empty = "" if cards else "<p class=quiet>No machines yet.</p>"
         return page("Bot manager", "<h1>Bots</h1><p class=quiet>Each bot runs on its own machine and signs in itself. "
                     f"This page sets them up.</p><div class=cards>{''.join(cards)}</div>{empty}"
@@ -335,7 +351,10 @@ class App:
         return page("Add a machine", f"<h1>Add a machine</h1>{f'<p class=bad>{esc(error)}</p>' if error else ''}"
                     f"<form method=post action='/m'><input type=hidden name=csrf value='{esc(csrf)}'>"
                     + field("Short name", "name", "", "Lowercase letters, numbers and dashes: jetson.")
-                    + field("SSH target", "target", "", "user@host, as you'd type after ssh (your SSH key must work without a password), or local for this machine.")
+                    + field("Where it runs", "target", "", "user@host, as you'd type after ssh (your SSH key must work without a password); "
+                            "wsl:Ubuntu for WSL on this computer; or local.")
+                    + field("Which bot there", "instance", "", "Empty for the machine's first bot. A short name (tester) for another bot on the same machine: "
+                            "its own settings, ports and services, on Claude.")
                     + field("Kit folder on it", "kit", "~/AgentsHangout-Agent", "Where the kit is, or will be cloned.")
                     + field("Branch", "branch", "", "Empty keeps the branch the kit is on (main when cloning). "
                             "Name one only to switch the kit to it.")
@@ -348,7 +367,8 @@ class App:
             return None
         st = self.status(name, fresh)
         c = f"<input type=hidden name=csrf value='{esc(csrf)}'>"
-        parts = [f"<h1>{esc(st.get('bot') or name)}</h1><p class=quiet>{esc(name)} · {esc(m['target'])}"
+        where = m["target"] + (f" · bot {m['instance']}" if m.get("instance") else "")
+        parts = [f"<h1>{esc(st.get('bot') or name)}</h1><p class=quiet>{esc(name)} · {esc(where)}"
                  + (f" · {esc(st.get('host'))}" if st.get("host") else "") + "</p>"]
         if notice:
             parts.append(f"<div class=note>{notice}</div>")
@@ -366,6 +386,10 @@ class App:
             parts.append(f"<p class=bad>Couldn't read the machine: {esc(st['error'])}</p>"
                          "<p class=quiet>Check that ssh works without a password, and that the kit is there (Update the kit clones it).</p>")
             return page(name, "".join(parts), csrf)
+        if not st.get("set_up"):
+            parts.append("<div class=note><b>Not set up yet.</b> 1. Sign in with OAuth below and pick the bot. "
+                         "2. In Settings choose OAuth and Claude, tick its capabilities and skills, and give the Anthropic key "
+                         "(and a GitHub token if it has GitHub). 3. Save and apply: setup.sh puts it together and starts it.</div>")
         si = st.get("signin") or {}
         renew = f" Access renews {ago(si.get('expires_at'))}." if si.get("oauth") else ""
         link = self.login_links.get(name)
@@ -504,13 +528,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.redirect("/login", {"Set-Cookie": "aha_manager=; Path=/; Max-Age=0"})
         if path == "/m":
             name, target, kit, branch = one("name").strip(), one("target").strip(), one("kit").strip() or "~/AgentsHangout-Agent", one("branch").strip()
+            instance = one("instance").strip()
+            if instance and not INSTANCE_RE.match(instance):
+                return self.send(400, app.new_form(csrf, "The bot's name there is lowercase letters, numbers and dashes."))
             if not NAME_RE.match(name):
                 return self.send(400, app.new_form(csrf, "Pick a short name: lowercase letters, numbers and dashes."))
             if app.machines.get(name):
                 return self.send(400, app.new_form(csrf, f"There's already a machine called {name}."))
             if not TARGET_RE.match(target) or not PATH_RE.match(kit) or (branch and not BRANCH_RE.match(branch)):
                 return self.send(400, app.new_form(csrf, "That SSH target, folder or branch has characters this page won't pass on."))
-            app.machines.put(name, {"target": target, "kit": kit})
+            app.machines.put(name, dict({"target": target, "kit": kit}, **({"instance": instance} if instance else {})))
             if one("install") == "1":
                 job = app.jobs.start(f"Cloning or updating the kit{f' ({branch})' if branch else ''}", name, install_argv(app.machines.get(name), branch))
                 return self.redirect(f"/jobs/{job}")

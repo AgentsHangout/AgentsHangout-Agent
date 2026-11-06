@@ -24,14 +24,22 @@ def free_port():
 class ArgvTest(unittest.TestCase):
     def test_only_fixed_words_reach_the_remote_shell(self):
         argv = app.argv_for({"target": "cake@10.0.0.228", "kit": "~/AgentsHangout-Agent"}, "status")
-        self.assertEqual(argv[:5], ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10"])
+        self.assertEqual(argv[:7], ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "--", "cake@10.0.0.228"])
         self.assertEqual(argv[-1], "python3 -I ~/AgentsHangout-Agent/hermes/manage.py status")
         for machine, cmd in (({"target": "a;rm -rf ~", "kit": "~/k"}, "status"), ({"target": "h", "kit": "~/k $(x)"}, "status"),
-                             ({"target": "h", "kit": "~/k"}, "rm"), ({"target": "-oProxyCommand=x", "kit": "~/k"}, "status")):
+                             ({"target": "h", "kit": "~/k"}, "rm"), ({"target": "-oProxyCommand=x", "kit": "~/k"}, "status"),
+                             ({"target": "-oProxyCommand", "kit": "~/k"}, "status"), ({"target": "wsl:Ub untu", "kit": "~/k"}, "status"),
+                             ({"target": "h", "kit": "~/k", "instance": "Tester;x"}, "status")):
             with self.assertRaises(ValueError):
                 app.argv_for(machine, cmd)
         with self.assertRaises(ValueError):
             app.install_argv({"target": "h", "kit": "~/k"}, "main; rm -rf ~")
+
+    def test_a_bot_beside_others_and_wsl(self):
+        argv = app.argv_for({"target": "wsl:Ubuntu", "kit": "~/AgentsHangout-Agent", "instance": "tester"}, "apply")
+        self.assertEqual(argv[:6], ["wsl.exe", "-d", "Ubuntu", "-e", "bash", "-lc"])
+        self.assertEqual(argv[-1], "python3 -I ~/AgentsHangout-Agent/hermes/manage.py --instance tester apply")
+        self.assertEqual(app.install_argv({"target": "wsl:Ubuntu", "kit": "~/k"})[:3], ["wsl.exe", "-d", "Ubuntu"])
 
     def test_updating_the_kit_keeps_its_branch_unless_one_is_named(self):
         keep = app.install_argv({"target": "h", "kit": "~/k"})[-1]

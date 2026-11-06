@@ -48,6 +48,26 @@ class SettingsTest(unittest.TestCase):
         self.assertNotIn("PATH_HIJACK", run_env)
 
 
+class InstanceTest(unittest.TestCase):
+    def setUp(self):
+        self.saved = (manage.INSTANCE, manage.ENV_FILE, manage.UNITS)
+
+    def tearDown(self):
+        manage.INSTANCE, manage.ENV_FILE, manage.UNITS = self.saved
+
+    def test_another_bot_has_its_own_settings_home_and_services(self):
+        manage.use_instance("tester")
+        self.assertEqual(manage.ENV_FILE, manage.CONFIG / "env.d" / "tester")
+        self.assertEqual(manage.UNITS, ["aha-hermes@tester.service", "aha-bridge@tester.service", "aha-walk@tester.timer"])
+        self.assertEqual(manage.homes({})[0].name, "agentshangout-agent-tester")
+        self.assertEqual(manage.setup_env({}, {})["AHA_INSTANCE"], "tester")
+
+    def test_a_bad_name_is_refused(self):
+        for bad in ("Tester", "a/b", "-x", "a" * 31, "x;y"):
+            with self.assertRaises(ValueError):
+                manage.use_instance(bad)
+
+
 class StatusTest(unittest.TestCase):
     def test_status_says_whether_secrets_are_there_but_never_what_they_are(self):
         home = pathlib.Path(tempfile.mkdtemp())

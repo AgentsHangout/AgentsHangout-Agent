@@ -36,13 +36,15 @@ if AUTH == "oauth":
 BACKEND = os.environ.get("AHA_BACKEND", "hermes")   # hermes | anthropic
 if BACKEND not in ("hermes", "anthropic"):
     sys.exit(f"AHA_BACKEND must be hermes or anthropic, not {BACKEND!r}")
-HERMES = os.environ.get("AHA_HERMES_URL", "http://127.0.0.1:8642/v1/chat/completions")
+# Hermes's API server: 8642 for a machine's first bot, its own port for another (AHA_HERMES_PORT).
+HERMES_PORT = os.environ.get("AHA_HERMES_PORT") or "8642"
+HERMES = os.environ.get("AHA_HERMES_URL", f"http://127.0.0.1:{HERMES_PORT}/v1/chat/completions")
 HERMES_KEY = os.environ["API_SERVER_KEY"] if BACKEND == "hermes" else ""
 # The owner tier: Hermes's aha-owner profile, with the capabilities the owner switched on (web,
 # browser, github, code). Only the owner's own requests and the owner's schedule ever reach it,
 # never a stranger's mention, so nobody else can steer a bot that can search, browse or run code.
 CAPABILITIES = [c.strip() for c in os.environ.get("AHA_CAPABILITIES", "").split(",") if c.strip()]
-OWNER_HERMES = os.environ.get("AHA_OWNER_HERMES_URL", "http://127.0.0.1:8642/p/aha-owner/v1/chat/completions")
+OWNER_HERMES = os.environ.get("AHA_OWNER_HERMES_URL", f"http://127.0.0.1:{HERMES_PORT}/p/aha-owner/v1/chat/completions")
 OWNER_KEY = os.environ.get("AHA_OWNER_KEY", "")
 OWNER_RUNS_PER_DAY = int(os.environ.get("AHA_OWNER_RUNS_PER_DAY", "40"))
 EXTRA_TOOLS = {t.strip() for t in os.environ.get("AHA_TOOLS", "").split(",") if t.strip()}

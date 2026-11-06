@@ -15,8 +15,19 @@ GitHub token) are never printed: status says only whether each is there. Standar
 import json, os, pathlib, re, subprocess, sys, time, urllib.request
 
 KIT = pathlib.Path(__file__).resolve().parent
-ENV_FILE = pathlib.Path.home() / ".config" / "agentshangout-agent" / "env"
+CONFIG = pathlib.Path.home() / ".config" / "agentshangout-agent"
+ENV_FILE = CONFIG / "env"
 UNITS = ["aha-model.service", "aha-hermes.service", "aha-bridge.service", "aha-walk.timer"]
+INSTANCE = ""      # another bot on this machine (setup.sh's AHA_INSTANCE), from --instance
+
+
+def use_instance(name):
+    """Points everything at one bot of several: its env.d file, its services."""
+    global INSTANCE, ENV_FILE, UNITS
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,29}", name):
+        raise ValueError("an instance is lowercase letters, numbers and dashes")
+    INSTANCE, ENV_FILE = name, CONFIG / "env.d" / name
+    UNITS = [f"aha-hermes@{name}.service", f"aha-bridge@{name}.service", f"aha-walk@{name}.timer"]
 CAPABILITIES = ("web", "browser", "github", "code")
 SECRETS = ("AGENTSHANGOUT_TOKEN", "ANTHROPIC_API_KEY", "GITHUB_TOKEN")
 TEXT_BAD = re.compile(r'["\\$`\r\n]')       # nothing the env file's two readers (systemd, bash) treat specially
@@ -131,7 +142,8 @@ def write_settings(changes, path=None):
 
 
 def homes(env):
-    aha_home = pathlib.Path(env.get("AHA_HOME") or pathlib.Path.home() / "agentshangout-agent")
+    default = pathlib.Path.home() / ("agentshangout-agent-" + INSTANCE if INSTANCE else "agentshangout-agent")
+    aha_home = pathlib.Path(env.get("AHA_HOME") or default)
     return aha_home, pathlib.Path(env.get("HERMES_HOME") or aha_home / "hermes-home")
 
 
@@ -254,6 +266,10 @@ def status():
         "host": os.uname().nodename if hasattr(os, "uname") else "",
         "bot": bot_name(env, aha_home),
         "kit": {"commit": kit, "branch": branch, "path": str(KIT.parent)},
+        "instance": INSTANCE,
+        "set_up": ENV_FILE.exists() and bool(env.get("AHA_HOME")),
+        "ports": {"hermes": env.get("AHA_HERMES_PORT") or ("" if INSTANCE else "8642"),
+                  "proxy": env.get("AHA_MCP_PROXY_PORT") or ("" if INSTANCE else "8649")},
         "aha_home": str(aha_home),
         "settings": {k: env.get(k, "") for k in SETTINGS},
         "secrets": {"AGENTSHANGOUT_TOKEN": bool(env.get("AGENTSHANGOUT_TOKEN")),
@@ -277,6 +293,7 @@ def setup_env(env, secrets):
     for k, v in env.items():
         if k.startswith("AHA_") or k in ("HERMES_HOME", "AGENTSHANGOUT_URL", "MODEL"):
             run_env[k] = v
+    run_env["AHA_INSTANCE"] = INSTANCE
     for k, v in (secrets or {}).items():
         if k in SECRETS and v:
             run_env[k] = v.strip()
@@ -291,6 +308,14 @@ def run_script(name, args=(), secrets=None):
 
 
 def main(argv):
+    argv = list(argv)
+    if len(argv) > 2 and argv[1] == "--instance":
+        try:
+            use_instance(argv[2])
+        except ValueError as e:
+            print(json.dumps({"error": str(e)}))
+            return
+        del argv[1:3]
     cmd = argv[1] if len(argv) > 1 else "status"
     stdin = sys.stdin.read() if cmd in ("set", "apply", "login-finish") else ""
     try:
@@ -304,7 +329,7 @@ def main(argv):
         elif cmd == "doctor":
             sys.exit(run_script("doctor.sh"))
         elif cmd == "restart":
-            subprocess.run(["systemctl", "--user", "restart", "aha-hermes.service", "aha-bridge.service"], check=True, timeout=120)
+            subprocess.run(["systemctl", "--user", "restart"] + [u for u in UNITS if "hermes" in u or "bridge" in u], check=True, timeout=120)
             out = {"restarted": True}
         elif cmd == "login-start":
             out = {"url": oauth_module(read_env()).start_login()}
