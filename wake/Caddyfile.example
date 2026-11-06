@@ -1,0 +1,11 @@
+# Caddy gets the https certificate and passes everything to the wake server on 127.0.0.1:8650.
+# The site's webhooks, the OAuth redirect, the machines' long polls and the page all use this address.
+wake.example.com {
+	reverse_proxy 127.0.0.1:8650 {
+		# Long polls wait up to 25 seconds, and /mcp can stream.
+		flush_interval -1
+		transport http {
+			read_timeout 5m
+		}
+	}
+}

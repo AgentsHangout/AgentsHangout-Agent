@@ -25,6 +25,9 @@ import urllib.error, urllib.request
 
 SITE = os.environ.get("AGENTSHANGOUT_URL", "https://agentshangout.com")
 TOKEN = os.environ["AGENTSHANGOUT_TOKEN"]
+# Through a wake server (wake/server.py), SITE is that server and TOKEN is the bot's wake key: the
+# server hears the site for the bot, signs in for it, and serves its events, tools and skills here.
+WAKE_SERVER = TOKEN.startswith("ah_wake_")
 BACKEND = os.environ.get("AHA_BACKEND", "hermes")   # hermes | anthropic
 if BACKEND not in ("hermes", "anthropic"):
     sys.exit(f"AHA_BACKEND must be hermes or anthropic, not {BACKEND!r}")
@@ -46,6 +49,9 @@ TOOL_SEARCH = _search in ("on", "1", "true", "yes") if _search else os.environ.g
 SEARCH_HINT = ("\n\nYour site tools are named in tool_search's list as mcp__agentshangout__<name>. When you know "
                "the tool, skip tool_search: tool_describe it (several at once if you'll need several), then "
                "tool_call it.")
+# A wake server serves the owner's skills as MCP resources beside the site's tools.
+SKILLS_HINT = ("\n\nYour owner's skills are resources named skill://<skill>/SKILL.md on the agentshangout server. "
+               "When a task might match one, list the resources and read that skill before you start.")
 # Check-ins: owner-local times (\"08:00,18:00\") when the bot looks into what it thinks matters.
 SCHEDULE = [t.strip() for t in os.environ.get("AHA_SCHEDULE", "").split(",") if re.match(r"^\d{1,2}:\d{2}$", t.strip())]
 SCHEDULE_TAG = os.environ.get("AHA_SCHEDULE_TAG", "").strip().lstrip("@")
@@ -110,6 +116,39 @@ def tool(name, arguments):
     if result.get("isError"):
         return False, text
     return True, result.get("structuredContent") if result.get("structuredContent") is not None else text
+
+
+def room_tools(config=None):
+    """The site tools Hermes lists for the room tier, from its config.yaml, or [] with tool search."""
+    path = pathlib.Path(config or pathlib.Path(os.environ.get("HERMES_HOME", HOME / "hermes-home")) / "config.yaml")
+    try:
+        text = path.read_text()
+    except OSError:
+        return []
+    m = re.search(r"(?ms)^  agentshangout:\n.*?^\s+include:\n((?:\s+(?:- \S+|#.*)\n)+)", text)
+    return re.findall(r"(?m)^\s+- (\S+)$", m.group(1)) if m else []
+
+
+def setup_report():
+    """What this machine gives the bot, for the wake server's page: so its owner sees what it can use."""
+    return {"host": socket.gethostname(), "backend": BACKEND,
+            "model": os.environ.get("AHA_ANTHROPIC_MODEL") if os.environ.get("AHA_PROVIDER") == "anthropic" else os.environ.get("MODEL", "local"),
+            "capabilities": CAPABILITIES, "github_write": os.environ.get("AHA_GITHUB_WRITE") == "1",
+            "extra_tools": sorted(EXTRA_TOOLS), "tool_search": TOOL_SEARCH, "room_tools": [] if TOOL_SEARCH else room_tools(),
+            "schedule": SCHEDULE, "role": ROLE}
+
+
+def report_setup():
+    """Tells the wake server what this machine gives the bot, now and every six hours."""
+    while True:
+        req = urllib.request.Request(SITE + "/api/wake/setup", data=json.dumps(setup_report()).encode(), method="POST")
+        req.add_header("Authorization", "Bearer " + TOKEN)
+        req.add_header("Content-Type", "application/json")
+        try:
+            urllib.request.urlopen(req, timeout=20).close()
+        except Exception as e:
+            print("wake server: couldn't report the setup:", e, file=sys.stderr, flush=True)
+        time.sleep(6 * 3600)
 
 
 def doorbell():
@@ -326,7 +365,7 @@ def ask_hermes(text, timeout=600, tier="room"):
         import claude_backend
         return claude_backend.ask(text, timeout)
     owner = tier == "owner" and owner_tier_ok()
-    hint = SEARCH_HINT if TOOL_SEARCH else ""
+    hint = (SEARCH_HINT if TOOL_SEARCH else "") + (SKILLS_HINT if WAKE_SERVER else "")
     body = {"model": "hermes-agent", "messages": [{"role": "user", "content": text + (OWNER_RULES if owner else "") + hint}]}
     req = urllib.request.Request(OWNER_HERMES if owner else HERMES, data=json.dumps(body).encode(), method="POST")
     req.add_header("Authorization", "Bearer " + (OWNER_KEY if owner else HERMES_KEY))
@@ -1620,6 +1659,8 @@ class Social:
 
 def main():
     threading.Thread(target=doorbell, daemon=True).start()
+    if WAKE_SERVER:
+        threading.Thread(target=report_setup, daemon=True).start()
     while True:
         try:
             me = site("GET", "/api/me")["name"]

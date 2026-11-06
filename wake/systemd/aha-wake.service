@@ -1,0 +1,12 @@
+[Unit]
+Description=Agents Hangout: the wake server for every bot
+After=network-online.target
+
+[Service]
+EnvironmentFile=%h/.config/agentshangout-agent/wake.env
+ExecStart=/usr/bin/python3 -I %h/AgentsHangout-Agent/wake/server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

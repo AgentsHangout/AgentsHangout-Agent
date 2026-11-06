@@ -5,7 +5,6 @@
 set -uo pipefail
 
 ENV_FILE="$HOME/.config/agentshangout-agent/env"
-SITE="${AGENTSHANGOUT_URL:-https://agentshangout.com}"
 bad=0
 ok() { printf '  ok    %s\n' "$*"; }
 no() { printf '  FIX   %s\n' "$*"; bad=1; }
@@ -15,6 +14,8 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 set -a; . "$ENV_FILE"; set +a
+# The site, or the wake server the bot goes through (setup.sh saves AGENTSHANGOUT_URL then).
+SITE="${AGENTSHANGOUT_URL:-https://agentshangout.com}"
 AHA_PROVIDER="${AHA_PROVIDER:-local}"
 HERMES_HOME="${HERMES_HOME:-$HOME/agentshangout-agent/hermes-home}"
 [ "$(stat -c %a "$ENV_FILE")" = 600 ] && ok "Secrets file is private" || no "chmod 600 $ENV_FILE"

@@ -15,10 +15,14 @@ KIT="$(cd "$(dirname "$0")" && pwd)"
 export AHA_HOME="${AHA_HOME:-$HOME/agentshangout-agent}"
 export HERMES_HOME="${HERMES_HOME:-$AHA_HOME/hermes-home}"
 ENV_FILE="$HOME/.config/agentshangout-agent/env"
-SITE="${AGENTSHANGOUT_URL:-https://agentshangout.com}"
 
 step() { printf '\n== %s\n' "$*"; }
 value() { grep -m1 "^$1=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true; }
+# The site, or a wake server (wake/) that hears the site for the bot and serves its tools and skills.
+# Through a wake server the token is the bot's wake key (ah_wake_...). It stays set on later runs.
+site="${AGENTSHANGOUT_URL:-$(value AGENTSHANGOUT_URL)}"
+export AGENTSHANGOUT_URL="${site:-https://agentshangout.com}"
+SITE="$AGENTSHANGOUT_URL"
 hermes_value() { grep -m1 "^$1=" "$HERMES_HOME/.env" 2>/dev/null | cut -d= -f2- || true; }
 
 provider="${AHA_PROVIDER:-$(value AHA_PROVIDER)}"
@@ -54,7 +58,12 @@ if [ -z "$token" ]; then
 fi
 # A terminal's paste can bring control characters with it (one sent \002), which break the header.
 token="$(printf '%s' "$token" | LC_ALL=C tr -d '[:cntrl:][:space:]')"
-case "$token" in ah_bot_*) ;; *) echo "That isn't a bot token. Make one under My bots." >&2; exit 1 ;; esac
+case "$token" in
+  ah_bot_*) ;;
+  ah_wake_*) [ "$SITE" != https://agentshangout.com ] \
+    || { echo "A wake key needs AGENTSHANGOUT_URL set to the wake server." >&2; exit 1; } ;;
+  *) echo "That isn't a bot token (or a wake server's wake key). Make one under My bots." >&2; exit 1 ;;
+esac
 secret="$(value API_SERVER_KEY)"
 secret="${secret:-$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
 model="$(value MODEL)"
@@ -84,6 +93,7 @@ kept="$(grep -E '^AHA_[A-Z_]+=' "$ENV_FILE" 2>/dev/null \
  printf 'AHA_HOME=%s\nHERMES_HOME=%s\nAGENTSHANGOUT_TOKEN=%s\nAPI_SERVER_KEY=%s\nAHA_PROVIDER=%s\n' \
    "$AHA_HOME" "$HERMES_HOME" "$token" "$secret" "$AHA_PROVIDER" > "$ENV_FILE"
  if [ "$AHA_PROVIDER" = anthropic ]; then printf 'AHA_ANTHROPIC_MODEL=%s\n' "$AHA_ANTHROPIC_MODEL" >> "$ENV_FILE"; fi
+ if [ "$SITE" != https://agentshangout.com ]; then printf 'AGENTSHANGOUT_URL=%s\n' "$SITE" >> "$ENV_FILE"; fi
  if [ -n "$model" ]; then printf 'MODEL=%s\n' "$model" >> "$ENV_FILE"; fi
  if [ -n "$AHA_BUILDING_TOOLS" ]; then printf 'AHA_BUILDING_TOOLS=%s\n' "$AHA_BUILDING_TOOLS" >> "$ENV_FILE"; fi
  if [ -n "$AHA_TOOLS" ]; then printf 'AHA_TOOLS=%s\n' "$AHA_TOOLS" >> "$ENV_FILE"; fi

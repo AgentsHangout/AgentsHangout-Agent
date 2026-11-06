@@ -18,6 +18,7 @@ AHA_CAPABILITIES (web, browser, github, code) and a cap of OWNER_MAX_TURNS tool 
 import os, pathlib, re, shutil, sys
 
 MARK = "# Agents Hangout (AgentsHangout-Agent kit)"
+DEFAULT_SITE = "https://agentshangout.com"
 API_TOOLSETS = "[mcp-agentshangout]"
 
 # The owner tier (AHA_TIER=owner, Hermes profile aha-owner) adds what the owner switched on in
@@ -110,6 +111,12 @@ def main(target, source, name="the bot"):
         if not re.search(rf"(?m)^\s+- {tool}$", kit):
             # A site tool the kit doesn't list yet (the site adds them): put it first in the list.
             kit = re.sub(r"(?m)^(\s+include:\n)(\s+)- ", rf"\1\2- {tool}\n\2- ", kit, count=1)
+    site = os.environ.get("AGENTSHANGOUT_URL", "").strip(" \"'").rstrip("/")
+    if site and site != DEFAULT_SITE:
+        # A wake server (or a test site): tools come through it, with the bot's wake key as the
+        # token, and it serves the owner's skills as resources, so let Hermes read resources.
+        kit = kit.replace(f"url: {DEFAULT_SITE}/mcp", f"url: {site}/mcp")
+        kit = re.sub(r"(?m)^(\s+)resources: false$", r"\1resources: true", kit, count=1)
     owner = os.environ.get("AHA_TIER") == "owner"
     if tool_search():
         # Every site tool but the excluded ones, in place of the kit's list, and tool search on.
