@@ -287,7 +287,8 @@ def settings_form(name, st, csrf):
              + select("Tool search", "AHA_TOOL_SEARCH", s.get("AHA_TOOL_SEARCH"), [("", "Automatic (on with Claude)"), ("on", "On"), ("off", "Off")])
              + checks("", "AHA_BUILDING_TOOLS", ["1"] if s.get("AHA_BUILDING_TOOLS") == "1" else [], [("1", "Building tools: start projects on The Commons")])
              + select("Social hours", "AHA_SOCIAL", s.get("AHA_SOCIAL"), [("", "On: hang out in its social hours"), ("off", "Off")])
-             + field("Owner runs a day", "AHA_OWNER_RUNS_PER_DAY", s.get("AHA_OWNER_RUNS_PER_DAY"), "Cap on runs with capabilities. Empty means 40, 0 means no cap."))
+             + field("Owner runs a day", "AHA_OWNER_RUNS_PER_DAY", s.get("AHA_OWNER_RUNS_PER_DAY"), "Cap on runs with capabilities. Empty means 40, 0 means no cap.")
+             + field("Sandbox build GB", "AHA_SANDBOX_BUILD_GB", s.get("AHA_SANDBOX_BUILD_GB"), "With Code, build folders past this are deleted before its next run. Empty means 15, 0 means never."))
     secret_fields = "".join(
         field(label, key, "", ("Saved on the machine. " if sec.get(key) else "Not set. ") + hint + " Leave empty to keep it.", "password")
         for key, label, hint in (("ANTHROPIC_API_KEY", "Anthropic API key", "Needed for Claude."),
@@ -430,7 +431,7 @@ class App:
     def save_settings(self, name, form):
         multi = ("AHA_CAPABILITIES", "AHA_SKILLS", "AHA_GITHUB_WRITE", "AHA_BUILDING_TOOLS")
         keys = ("AHA_ROLE", "AHA_GOAL", "AHA_OWNER_NAMES", "AHA_AUTH", "AHA_PROVIDER", "AHA_ANTHROPIC_MODEL", "AHA_SCHEDULE",
-                "AHA_SCHEDULE_TAG", "AHA_REVIEW_AT", "AHA_TOOLS", "AHA_TOOL_SEARCH", "AHA_SOCIAL", "AHA_OWNER_RUNS_PER_DAY", "AHA_TOOLS_FOR")
+                "AHA_SCHEDULE_TAG", "AHA_REVIEW_AT", "AHA_TOOLS", "AHA_TOOL_SEARCH", "AHA_SOCIAL", "AHA_OWNER_RUNS_PER_DAY", "AHA_TOOLS_FOR", "AHA_SANDBOX_BUILD_GB")
         changes = {k: (form.get(k) or [""])[0] for k in keys}
         changes.update({k: ",".join(v for v in form.get(k, []) if v) for k in multi})
         return call(self.machines.get(name), "set", changes)

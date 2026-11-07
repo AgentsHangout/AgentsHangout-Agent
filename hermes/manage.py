@@ -92,6 +92,7 @@ SETTINGS = {
     "AHA_REVIEW_AT": lambda v: csv(v, lambda x: bool(TIME.match(x))),
     "AHA_SOCIAL": choice("", "off"),
     "AHA_OWNER_RUNS_PER_DAY": number,
+    "AHA_SANDBOX_BUILD_GB": number,
 }
 
 

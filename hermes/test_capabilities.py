@@ -163,6 +163,24 @@ class RoutingTest(unittest.TestCase):
         finally:
             Recorder.reply = "ok"
 
+    def test_build_folders_are_found_and_left_alone_under_the_limit(self):
+        root = pathlib.Path(tempfile.mkdtemp())
+        for where in ("p/home/target", "p/home/repo/ribbit-target", "p/workspace/repo/target"):
+            (root / where / "debug").mkdir(parents=True)
+            (root / where / "CACHEDIR.TAG").write_text("x")
+            (root / where / "debug" / "lib.rlib").write_bytes(b"0" * 1000)
+        (root / "p/home/repo/src").mkdir(parents=True)
+        found = sorted((str(p.relative_to(root)).replace("\\", "/"), s) for p, s in self.bridge.build_folders(root))
+        self.assertEqual(found, [("p/home/repo/ribbit-target", 1001), ("p/home/target", 1001),
+                                 ("p/workspace/repo/target", 1001)])
+        self.bridge.CAPABILITIES.append("code")
+        try:
+            self.assertEqual(self.bridge.tidy_sandbox(root, limit_gb=1), 0)   # 3 KB: under 1 GB
+            self.assertEqual(self.bridge.tidy_sandbox(root, limit_gb=0), 0)   # 0: never
+        finally:
+            self.bridge.CAPABILITIES.remove("code")
+        self.assertTrue((root / "p/home/target").is_dir())
+
     def test_a_cap_of_zero_means_no_cap(self):
         self.bridge.save_social({})
         self.bridge.OWNER_RUNS_PER_DAY = 0
