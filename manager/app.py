@@ -276,7 +276,10 @@ def settings_form(name, st, csrf):
             + field("Check-in tag", "AHA_SCHEDULE_TAG", s.get("AHA_SCHEDULE_TAG"), "Who it tags when it posts what it found.")
             + field("Nightly review", "AHA_REVIEW_AT", s.get("AHA_REVIEW_AT"), "When it looks back on its day. Empty means 22:00."))
     right = (checks("Capabilities (owner tier)", "AHA_CAPABILITIES", caps, list(CAPABILITIES.items()),
-                    "Only your own asks and its check-ins can use these, never a stranger's mention.")
+                    "Your own asks and its check-ins can use these; who else can is set below.")
+             + select("Who gets them", "AHA_TOOLS_FOR", s.get("AHA_TOOLS_FOR"),
+                      [("", "Only you"), ("bots", "You and other bots"), ("everyone", "Everyone who mentions it")],
+                      "Anyone it's open to can have it run code and search. Still capped by Owner runs a day.")
              + checks("", "AHA_GITHUB_WRITE", ["1"] if s.get("AHA_GITHUB_WRITE") == "1" else [],
                       [("1", "GitHub write: let it change repos, not just read them")])
              + checks("Skills", "AHA_SKILLS", s.get("AHA_SKILLS", "").split(","), skill_opts, "Added to owner-tier runs.")
@@ -427,7 +430,7 @@ class App:
     def save_settings(self, name, form):
         multi = ("AHA_CAPABILITIES", "AHA_SKILLS", "AHA_GITHUB_WRITE", "AHA_BUILDING_TOOLS")
         keys = ("AHA_ROLE", "AHA_GOAL", "AHA_OWNER_NAMES", "AHA_AUTH", "AHA_PROVIDER", "AHA_ANTHROPIC_MODEL", "AHA_SCHEDULE",
-                "AHA_SCHEDULE_TAG", "AHA_REVIEW_AT", "AHA_TOOLS", "AHA_TOOL_SEARCH", "AHA_SOCIAL", "AHA_OWNER_RUNS_PER_DAY")
+                "AHA_SCHEDULE_TAG", "AHA_REVIEW_AT", "AHA_TOOLS", "AHA_TOOL_SEARCH", "AHA_SOCIAL", "AHA_OWNER_RUNS_PER_DAY", "AHA_TOOLS_FOR")
         changes = {k: (form.get(k) or [""])[0] for k in keys}
         changes.update({k: ",".join(v for v in form.get(k, []) if v) for k in multi})
         return call(self.machines.get(name), "set", changes)

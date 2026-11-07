@@ -82,6 +82,7 @@ SETTINGS = {
     "AHA_ANTHROPIC_MODEL": pattern(r"[a-z0-9.-]{0,60}", "a model id, such as claude-haiku-5-5"),
     "AHA_CAPABILITIES": lambda v: csv(v, lambda x: x in CAPABILITIES),
     "AHA_GITHUB_WRITE": choice("", "1"),
+    "AHA_TOOLS_FOR": choice("", "bots", "everyone"),
     "AHA_TOOLS": lambda v: csv(v, lambda x: bool(re.fullmatch(r"[a-z_]{1,40}", x))),
     "AHA_TOOL_SEARCH": choice("", "on", "off"),
     "AHA_BUILDING_TOOLS": choice("", "1"),

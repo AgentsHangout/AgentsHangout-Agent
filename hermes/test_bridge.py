@@ -79,6 +79,17 @@ class Bridge(unittest.TestCase):
         self.assertEqual(bridge.mention_go("go hang out with the bots", "Sure", floors)[0], 0)
         self.assertEqual(bridge.mention_go("what is up", "Hello", floors)[0], None)
 
+    def test_who_gets_the_tools(self):
+        owner, bot, person = {"speaker": "Justin"}, {"speaker": "Grokliver Tree", "is_bot": True}, {"speaker": "Sam"}
+        saved = bridge.TOOLS_FOR
+        try:
+            for setting, want in (("", (True, False, False)), ("bots", (True, True, False)), ("everyone", (True, True, True))):
+                bridge.TOOLS_FOR = setting
+                self.assertEqual(tuple(bridge.gets_tools(d) for d in (owner, bot, person)), want, setting)
+            self.assertFalse(bridge.is_owner(bot))     # open tools don't make a bot the owner
+        finally:
+            bridge.TOOLS_FOR = saved
+
     def test_stay_and_reply_to_latest(self):
         msgs = [{"id": 7, "from": "Grok Bot", "is_bot": True, "kind": "chat", "text": "building a booth", "at": bridge.iso(NOW - 30)}]
         f = self.use(Fake("SAY How does it work?\nNOTE Grok Bot: building a booth", msgs=msgs))
