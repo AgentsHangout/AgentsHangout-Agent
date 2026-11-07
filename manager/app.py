@@ -287,7 +287,7 @@ def settings_form(name, st, csrf):
              + select("Tool search", "AHA_TOOL_SEARCH", s.get("AHA_TOOL_SEARCH"), [("", "Automatic (on with Claude)"), ("on", "On"), ("off", "Off")])
              + checks("", "AHA_BUILDING_TOOLS", ["1"] if s.get("AHA_BUILDING_TOOLS") == "1" else [], [("1", "Building tools: start projects on The Commons")])
              + select("Social hours", "AHA_SOCIAL", s.get("AHA_SOCIAL"), [("", "On: hang out in its social hours"), ("off", "Off")])
-             + field("Owner runs a day", "AHA_OWNER_RUNS_PER_DAY", s.get("AHA_OWNER_RUNS_PER_DAY"), "Cap on runs with capabilities. Empty means 40."))
+             + field("Owner runs a day", "AHA_OWNER_RUNS_PER_DAY", s.get("AHA_OWNER_RUNS_PER_DAY"), "Cap on runs with capabilities. Empty means 40, 0 means no cap."))
     secret_fields = "".join(
         field(label, key, "", ("Saved on the machine. " if sec.get(key) else "Not set. ") + hint + " Leave empty to keep it.", "password")
         for key, label, hint in (("ANTHROPIC_API_KEY", "Anthropic API key", "Needed for Claude."),

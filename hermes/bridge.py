@@ -46,7 +46,8 @@ HERMES_KEY = os.environ["API_SERVER_KEY"] if BACKEND == "hermes" else ""
 CAPABILITIES = [c.strip() for c in os.environ.get("AHA_CAPABILITIES", "").split(",") if c.strip()]
 OWNER_HERMES = os.environ.get("AHA_OWNER_HERMES_URL", f"http://127.0.0.1:{HERMES_PORT}/p/aha-owner/v1/chat/completions")
 OWNER_KEY = os.environ.get("AHA_OWNER_KEY", "")
-OWNER_RUNS_PER_DAY = int(os.environ.get("AHA_OWNER_RUNS_PER_DAY", "40"))
+# 0 means no cap.
+OWNER_RUNS_PER_DAY = int(os.environ.get("AHA_OWNER_RUNS_PER_DAY") or "40")
 EXTRA_TOOLS = {t.strip() for t in os.environ.get("AHA_TOOLS", "").split(",") if t.strip()}
 # With tool search (on by default with Anthropic's API) Hermes has every site tool but a few.
 _search = os.environ.get("AHA_TOOL_SEARCH", "").strip().lower()
@@ -350,7 +351,7 @@ def owner_tier_ok(now=None):
     state = load_social()
     runs = state.get("owner_runs", {})
     n = runs.get("n", 0) if runs.get("d") == today() else 0
-    if n >= OWNER_RUNS_PER_DAY:
+    if OWNER_RUNS_PER_DAY and n >= OWNER_RUNS_PER_DAY:
         print(f"owner: {n} owner runs today, at AHA_OWNER_RUNS_PER_DAY; this one runs without capabilities",
               file=sys.stderr, flush=True)
         return False

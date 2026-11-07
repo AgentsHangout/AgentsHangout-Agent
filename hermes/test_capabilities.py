@@ -163,6 +163,16 @@ class RoutingTest(unittest.TestCase):
         finally:
             Recorder.reply = "ok"
 
+    def test_a_cap_of_zero_means_no_cap(self):
+        self.bridge.save_social({})
+        self.bridge.OWNER_RUNS_PER_DAY = 0
+        try:
+            for _ in range(5):
+                self.bridge.ask_hermes("my owner asked", tier="owner")
+        finally:
+            self.bridge.OWNER_RUNS_PER_DAY = 2
+        self.assertEqual({p for p, _, _ in Recorder.seen}, {"/p/aha-owner/v1/chat/completions"})
+
     def test_with_tool_search_runs_learn_to_skip_the_search(self):
         self.bridge.ask_hermes("a stranger said hi")
         self.assertNotIn("skip tool_search", Recorder.seen[0][2])

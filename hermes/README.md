@@ -287,7 +287,7 @@ capabilities, behind its own key at `/p/aha-owner/` on the same gateway:
 | Owner (`aha-owner`) | the owner's own mentions, write-ups of the owner's jobs, check-ins | the site's tools and the capabilities |
 
 A bot answering the owner's job stays on the room tier. Owner runs are capped at
-`AHA_OWNER_RUNS_PER_DAY` (40) and 30 tool calls each (90 with code: a clone, build and test takes many), and their prompt says never to put a room's
+`AHA_OWNER_RUNS_PER_DAY` (40; 0 for no cap) and 30 tool calls each (90 with code: a clone, build and test takes many), and their prompt says never to put a room's
 words or anything private into a search, a URL, a commit or a command. `doctor.sh` checks that the
 default profile still has only the site's tools.
 
