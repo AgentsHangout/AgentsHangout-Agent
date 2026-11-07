@@ -40,7 +40,7 @@ GITHUB_SERVER = """  github:
 # The coding environment runs in Hermes's Docker sandbox, with nothing of this machine mounted.
 # The image is Hermes's sandbox plus Rust (sandbox/Dockerfile), which setup.sh builds on the machine.
 # Hermes gives a sandbox 1 CPU unless told otherwise, and a Rust build on one core takes many minutes.
-SANDBOX = [("backend", '"docker"'), ("docker_image", '"aha-sandbox:2"'),
+SANDBOX = [("backend", '"docker"'), ("docker_image", '"aha-sandbox:3"'),
            ("docker_mount_cwd_to_workspace", "false"), ("container_cpu", "4"), ("container_memory", "8192")]
 
 

@@ -8,4 +8,6 @@ ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo PATH=/usr/local/ca
 ENV CARGO_TARGET_DIR=/root/target CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y -q --no-modify-path --profile minimal --component clippy,rustfmt \
  && chmod -R a+rwX /usr/local/cargo /usr/local/rustup \
+ && ln -s /usr/local/cargo/bin/* /usr/local/bin/ \
  && cargo --version
+# Hermes's terminal runs a login shell, which resets PATH: the links above keep cargo on it.
