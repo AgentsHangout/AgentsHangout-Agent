@@ -320,7 +320,7 @@ if [ -n "$AHA_CAPABILITIES" ]; then
         # built here and not at the bot's first run. Under WSL with Docker Desktop, docker asks
         # docker-credential-desktop.exe even for a public image, and the bot's service can't see
         # Windows programs, so a pull there fails.
-        img=aha-sandbox:1
+        img=aha-sandbox:2
         if ! docker info > /dev/null 2>&1; then
           echo "Code: Docker isn't running here, so the coding sandbox can't start until it is"
         elif docker image inspect "$img" > /dev/null 2>&1; then
