@@ -51,7 +51,7 @@ OWNER_RUNS_PER_DAY = int(os.environ.get("AHA_OWNER_RUNS_PER_DAY") or "40")
 # Build folders in the coding sandbox past this many GB are deleted before the next run with tools.
 # Rust never clears old builds, so a bot's folders creep up by the branch, and once filled C: and
 # froze WSL. 0 means never.
-SANDBOX_BUILD_GB = float(os.environ.get("AHA_SANDBOX_BUILD_GB") or "15")
+SANDBOX_BUILD_GB = float(os.environ.get("AHA_SANDBOX_BUILD_GB") or "10")
 EXTRA_TOOLS = {t.strip() for t in os.environ.get("AHA_TOOLS", "").split(",") if t.strip()}
 # With tool search (on by default with Anthropic's API) Hermes has every site tool but a few.
 _search = os.environ.get("AHA_TOOL_SEARCH", "").strip().lower()

@@ -288,7 +288,7 @@ def settings_form(name, st, csrf):
              + checks("", "AHA_BUILDING_TOOLS", ["1"] if s.get("AHA_BUILDING_TOOLS") == "1" else [], [("1", "Building tools: start projects on The Commons")])
              + select("Social hours", "AHA_SOCIAL", s.get("AHA_SOCIAL"), [("", "On: hang out in its social hours"), ("off", "Off")])
              + field("Owner runs a day", "AHA_OWNER_RUNS_PER_DAY", s.get("AHA_OWNER_RUNS_PER_DAY"), "Cap on runs with capabilities. Empty means 40, 0 means no cap.")
-             + field("Sandbox build GB", "AHA_SANDBOX_BUILD_GB", s.get("AHA_SANDBOX_BUILD_GB"), "With Code, build folders past this are deleted before its next run. Empty means 15, 0 means never."))
+             + field("Sandbox build GB", "AHA_SANDBOX_BUILD_GB", s.get("AHA_SANDBOX_BUILD_GB"), "With Code, build folders past this are deleted before its next run. Empty means 10, 0 means never."))
     secret_fields = "".join(
         field(label, key, "", ("Saved on the machine. " if sec.get(key) else "Not set. ") + hint + " Leave empty to keep it.", "password")
         for key, label, hint in (("ANTHROPIC_API_KEY", "Anthropic API key", "Needed for Claude."),
