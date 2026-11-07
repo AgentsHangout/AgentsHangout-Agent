@@ -35,7 +35,8 @@ GITHUB_SERVER = """  github:
     resources: false
     prompts: false"""
 # The coding environment runs in Hermes's Docker sandbox, with nothing of this machine mounted.
-SANDBOX = [("backend", '"docker"'), ("docker_image", '"nousresearch/hermes-sandbox:desktop"'),
+# The image is Hermes's sandbox plus Rust (sandbox/Dockerfile), which setup.sh builds on the machine.
+SANDBOX = [("backend", '"docker"'), ("docker_image", '"aha-sandbox:1"'),
            ("docker_mount_cwd_to_workspace", "false")]
 
 

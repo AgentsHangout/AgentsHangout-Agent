@@ -114,8 +114,8 @@ if [ -n "${AHA_CAPABILITIES:-}" ]; then
   esac
   case ",$AHA_CAPABILITIES," in *,code,*)
     if ! docker info > /dev/null 2>&1; then no "Docker isn't running, so the coding sandbox can't start"
-    elif docker image inspect nousresearch/hermes-sandbox:desktop > /dev/null 2>&1; then ok "Docker is running, with the sandbox image"
-    else no "The sandbox image isn't downloaded, and the bot may not be able to fetch it: run docker pull nousresearch/hermes-sandbox:desktop"; fi
+    elif docker image inspect aha-sandbox:1 > /dev/null 2>&1; then ok "Docker is running, with the sandbox image (Rust included)"
+    else no "The sandbox image isn't built, so the sandbox can't start. Run setup.sh"; fi
     case ",$AHA_CAPABILITIES," in *,github,*) echo "  info  Code in the sandbox can read the GitHub token: keep it to the repos you mean" ;; esac ;;
   esac
   case ",$AHA_CAPABILITIES," in *,browser,*) echo "  info  The browser runs Chromium: about 500 MB more while it's open" ;; esac

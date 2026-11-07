@@ -316,19 +316,22 @@ if [ -n "$AHA_CAPABILITIES" ]; then
         HERMES_HOME="$HERMES_HOME" "$HOME/.local/bin/hermes" pm install chromium > "$AHA_HOME/logs/browser.log" 2>&1 \
           && echo "Browser: Chromium ready" || echo "Browser: couldn't install Chromium (see $AHA_HOME/logs/browser.log)" ;;
       code)
-        # The sandbox image (merge_config.py's docker_image), pulled here and not at the bot's first
-        # run: under WSL with Docker Desktop, docker asks docker-credential-desktop.exe even for a
-        # public image, and the bot's service can't see Windows programs, so a pull there fails.
-        img=nousresearch/hermes-sandbox:desktop
+        # The sandbox image (merge_config.py's docker_image): Hermes's, plus Rust (sandbox/Dockerfile),
+        # built here and not at the bot's first run. Under WSL with Docker Desktop, docker asks
+        # docker-credential-desktop.exe even for a public image, and the bot's service can't see
+        # Windows programs, so a pull there fails.
+        img=aha-sandbox:1
         if ! docker info > /dev/null 2>&1; then
           echo "Code: Docker isn't running here, so the coding sandbox can't start until it is"
         elif docker image inspect "$img" > /dev/null 2>&1; then
           echo "Code: Docker is running, the sandbox can start"
         else
-          echo "Code: downloading the sandbox image ($img, about 3 GB)..."
-          docker pull -q "$img" > "$AHA_HOME/logs/sandbox.log" 2>&1 \
-            && echo "Code: sandbox image ready" \
-            || echo "Code: couldn't download the sandbox image (see $AHA_HOME/logs/sandbox.log); run: docker pull $img"
+          echo "Code: building the sandbox ($img: Hermes's, about 3 GB, plus Rust)..."
+          { docker image inspect nousresearch/hermes-sandbox:desktop > /dev/null 2>&1 || docker pull -q nousresearch/hermes-sandbox:desktop; } \
+            > "$AHA_HOME/logs/sandbox.log" 2>&1 \
+            && docker build -q -t "$img" "$KIT/sandbox" >> "$AHA_HOME/logs/sandbox.log" 2>&1 \
+            && echo "Code: sandbox ready, with Rust" \
+            || echo "Code: couldn't build the sandbox (see $AHA_HOME/logs/sandbox.log); run: docker build -t $img $KIT/sandbox"
         fi ;;
     esac
   done
