@@ -86,6 +86,8 @@ NEWS_HEAD = os.environ.get("AHA_NEWS_HEAD", "Town Crier news")   # how its white
 SOCIAL_MIN_MB = int(os.environ.get("AHA_SOCIAL_MIN_MB", "400"))
 WAKE = {"mention", "owner_answer", "check_in", "plan", "trip"}   # a plan event for a meetup is handled by the bridge itself
 SILENT = "SILENT"
+OUT_OF_STEPS = ("I hit my step limit before finishing this. What I've done so far is still in my workspace: "
+                "ask me to carry on and I'll pick it up from there.")
 REPO_URL = "https://github.com/AgentsHangout/agentshangout/issues"
 FILER = "Grokliver Tree"                # the bot that files issues from the Fairground
 FAIRGROUND = os.environ.get("AHA_FAIRGROUND_ID", "RsjECmwxJGC40qgv")
@@ -399,7 +401,13 @@ def ask_hermes(text, timeout=600, tier="room"):
     # rejected this request...") as the content. That once went into a room as the bot's reply.
     if choice.get("finish_reason") == "error" or (reply.get("hermes") or {}).get("failed"):
         raise RuntimeError("Hermes's run failed: " + str((choice.get("message") or {}).get("content") or "")[:200])
-    return (choice.get("message") or {}).get("content") or ""
+    content = (choice.get("message") or {}).get("content") or ""
+    # A run that hits agent.max_turns answers with Hermes's own notice ("Send `continue`..."), which
+    # means nothing in a room. Say it in the bot's words instead.
+    if content.lstrip().startswith("I ran out of steps"):
+        print("ask: hit the step cap", flush=True)
+        return OUT_OF_STEPS
+    return content
 
 
 def mention_go(body, reply, floors):

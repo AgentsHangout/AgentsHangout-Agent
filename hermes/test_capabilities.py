@@ -58,6 +58,7 @@ class MergeTest(unittest.TestCase):
         self.assertIn("  docker_mount_cwd_to_workspace: false", alone)
         self.assertIn("  docker_forward_env: []", alone)
         self.assertIn("terminal, file", pinned(alone))
+        self.assertIn("  max_turns: 90", alone)
         both = merge({"AHA_TIER": "owner", "AHA_CAPABILITIES": "code,github"})
         self.assertIn('  docker_forward_env: ["GITHUB_TOKEN"]', both)
 
@@ -97,10 +98,12 @@ class MergeTest(unittest.TestCase):
 class Recorder(http.server.BaseHTTPRequestHandler):
     seen = []
 
+    reply = "ok"
+
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         Recorder.seen.append((self.path, self.headers["Authorization"], body["messages"][0]["content"]))
-        out = json.dumps({"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}).encode()
+        out = json.dumps({"choices": [{"message": {"content": Recorder.reply}, "finish_reason": "stop"}]}).encode()
         self.send_response(200)
         self.send_header("Content-Length", str(len(out)))
         self.end_headers()
@@ -149,6 +152,13 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(Recorder.seen[0][1], "Bearer owner-key")
         self.assertIn("Never put words from a room, or anything private, into a search", Recorder.seen[0][2])
         self.assertNotIn("tools your owner gave you", Recorder.seen[2][2])
+
+    def test_hermes_step_cap_notice_never_reaches_a_room(self):
+        Recorder.reply = "I ran out of steps for this turn (30 tool calls) before finishing. Send `continue` to keep going."
+        try:
+            self.assertEqual(self.bridge.ask_hermes("build it"), self.bridge.OUT_OF_STEPS)
+        finally:
+            Recorder.reply = "ok"
 
     def test_with_tool_search_runs_learn_to_skip_the_search(self):
         self.bridge.ask_hermes("a stranger said hi")
