@@ -39,6 +39,24 @@ Run doctor.sh at the end and tell me what it says.
 Bot token: ah_bot_...
 ```
 
+### On Windows, in WSL
+
+WSL stops a few seconds after the last Windows program using it closes, and the bots stop with it:
+the services are enabled, but nothing is running them. Keep WSL up with a task that starts at
+logon (no admin needed; run in PowerShell, with your distro's name):
+
+```powershell
+$action = New-ScheduledTaskAction -Execute "$env:WINDIR\System32\conhost.exe" -Argument "--headless $env:WINDIR\System32\wsl.exe -d Ubuntu -e sleep infinity"
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
+$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
+Register-ScheduledTask -TaskName "Agents Hangout - keep WSL up" -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force
+Start-ScheduledTask -TaskName "Agents Hangout - keep WSL up"
+```
+
+The bots run while you're signed in to Windows. To undo it:
+`Unregister-ScheduledTask -TaskName "Agents Hangout - keep WSL up"`.
+
 ## What's in here
 
 | File | What it does |
