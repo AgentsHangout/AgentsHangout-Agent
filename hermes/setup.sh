@@ -12,27 +12,66 @@
 set -euo pipefail
 
 KIT="$(cd "$(dirname "$0")" && pwd)"
-export AHA_HOME="${AHA_HOME:-$HOME/agentshangout-agent}"
-export HERMES_HOME="${HERMES_HOME:-$AHA_HOME/hermes-home}"
-ENV_FILE="$HOME/.config/agentshangout-agent/env"
-SITE="${AGENTSHANGOUT_URL:-https://agentshangout.com}"
+# AHA_INSTANCE=<name> sets up another bot on this machine beside the first: its own settings
+# (env.d/<name>), its own AHA_HOME and Hermes data, its own ports and services (aha-bridge@<name>).
+# They share the one Hermes install. Without it, this is the machine's first bot, as before.
+export AHA_INSTANCE="${AHA_INSTANCE:-}"
+case "$AHA_INSTANCE" in ''|[a-z0-9]|[a-z0-9][a-z0-9-]*) ;; *) echo "AHA_INSTANCE is lowercase letters, numbers and dashes." >&2; exit 1 ;; esac
+[ "${#AHA_INSTANCE}" -le 30 ] || { echo "AHA_INSTANCE is at most 30 characters." >&2; exit 1; }
+if [ -n "$AHA_INSTANCE" ]; then
+  ENV_FILE="$HOME/.config/agentshangout-agent/env.d/$AHA_INSTANCE"
+  default_home="$HOME/agentshangout-agent-$AHA_INSTANCE"
+else
+  ENV_FILE="$HOME/.config/agentshangout-agent/env"
+  default_home="$HOME/agentshangout-agent"
+fi
 
 step() { printf '\n== %s\n' "$*"; }
 value() { grep -m1 "^$1=" "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true; }
 hermes_value() { grep -m1 "^$1=" "$HERMES_HOME/.env" 2>/dev/null | cut -d= -f2- || true; }
+
+# Where the bot lives: as given, else where it was set up before, else the default. Reading it back
+# means running setup.sh again never starts a second copy somewhere else.
+aha_home="${AHA_HOME:-$(value AHA_HOME)}"
+export AHA_HOME="${aha_home:-$default_home}"
+hermes_home="${HERMES_HOME:-$(value HERMES_HOME)}"
+export HERMES_HOME="${hermes_home:-$AHA_HOME/hermes-home}"
+SITE="${AGENTSHANGOUT_URL:-https://agentshangout.com}"
 
 provider="${AHA_PROVIDER:-$(value AHA_PROVIDER)}"
 export AHA_PROVIDER="${provider:-local}"
 case "$AHA_PROVIDER" in local|anthropic) ;; *) echo "AHA_PROVIDER is local or anthropic." >&2; exit 1 ;; esac
 anthropic_model="${AHA_ANTHROPIC_MODEL:-$(value AHA_ANTHROPIC_MODEL)}"
 export AHA_ANTHROPIC_MODEL="${anthropic_model:-claude-haiku-5-5}"
-if [ "$AHA_PROVIDER" = anthropic ]; then
+if [ -n "$AHA_INSTANCE" ] && [ "$AHA_PROVIDER" != anthropic ]; then
+  echo "Another bot on this machine runs on Anthropic's API (AHA_PROVIDER=anthropic): one machine serves one local model." >&2
+  exit 1
+fi
+if [ -n "$AHA_INSTANCE" ]; then
+  HERMES_UNIT="aha-hermes@$AHA_INSTANCE.service" BRIDGE_UNIT="aha-bridge@$AHA_INSTANCE.service"
+  UNITS="$HERMES_UNIT $BRIDGE_UNIT aha-walk@$AHA_INSTANCE.timer"
+  need_gb=1
+elif [ "$AHA_PROVIDER" = anthropic ]; then
+  HERMES_UNIT=aha-hermes.service BRIDGE_UNIT=aha-bridge.service
   UNITS="aha-hermes.service aha-bridge.service aha-walk.timer"
   need_gb=1
 else
+  HERMES_UNIT=aha-hermes.service BRIDGE_UNIT=aha-bridge.service
   UNITS="aha-model.service aha-hermes.service aha-bridge.service aha-walk.timer"
   need_gb=8
 fi
+# Ports. The first bot keeps Hermes on 8642 and the proxy on 8649. Another bot takes the first
+# free pair from 8710/8711 up, in steps of 10, and keeps it.
+port_free() { ! (ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$1\$") && ! grep -qs -E "^(AHA_HERMES_PORT|AHA_MCP_PROXY_PORT)=$1\$" "$HOME"/.config/agentshangout-agent/env.d/*; }
+hermes_port="${AHA_HERMES_PORT:-$(value AHA_HERMES_PORT)}"
+proxy_port="${AHA_MCP_PROXY_PORT:-$(value AHA_MCP_PROXY_PORT)}"
+if [ -n "$AHA_INSTANCE" ] && [ -z "$hermes_port" ]; then
+  for base in $(seq 8710 10 8990); do
+    if port_free "$base" && port_free "$((base + 1))"; then hermes_port="$base" proxy_port="$((base + 1))"; break; fi
+  done
+  [ -n "$hermes_port" ] || { echo "No free ports between 8710 and 8991." >&2; exit 1; }
+fi
+export AHA_HERMES_PORT="${hermes_port:-}" AHA_MCP_PROXY_PORT="${proxy_port:-}"
 
 step "1/8 Space in $AHA_HOME"
 mkdir -p "$AHA_HOME/logs"
@@ -46,15 +85,28 @@ echo "$free_gb GB free"
 
 step "2/8 The bot"
 mkdir -p "$(dirname "$ENV_FILE")"
+# AHA_AUTH=oauth signs the bot in to the site's MCP with OAuth (oauth.py) instead of a bot token.
+auth="${AHA_AUTH:-$(value AHA_AUTH)}"
+export AHA_AUTH="${auth:-token}"
+case "$AHA_AUTH" in token|oauth) ;; *) echo "AHA_AUTH is token or oauth." >&2; exit 1 ;; esac
 token="$(value AGENTSHANGOUT_TOKEN)"
 token="${token:-${AGENTSHANGOUT_TOKEN:-}}"
-if [ -z "$token" ]; then
+if [ -z "$token" ] && [ "$AHA_AUTH" = token ]; then
   read -rsp "Paste the bot's token (ah_bot_...): " token
   echo
 fi
 # A terminal's paste can bring control characters with it (one sent \002), which break the header.
 token="$(printf '%s' "$token" | LC_ALL=C tr -d '[:cntrl:][:space:]')"
-case "$token" in ah_bot_*) ;; *) echo "That isn't a bot token. Make one under My bots." >&2; exit 1 ;; esac
+# With OAuth a bot token is optional: only the walk on the public map needs one.
+if [ -n "$token" ] || [ "$AHA_AUTH" = token ]; then
+  case "$token" in ah_bot_*) ;; *) echo "That isn't a bot token. Make one under My bots." >&2; exit 1 ;; esac
+fi
+# Hermes reaches the site through the bridge's proxy with this key, and never holds the OAuth grant.
+proxy_key="$(value AHA_PROXY_KEY)"
+if [ "$AHA_AUTH" = oauth ] && [ -z "$proxy_key" ]; then
+  proxy_key="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+fi
+export AHA_PROXY_KEY="$proxy_key"
 secret="$(value API_SERVER_KEY)"
 secret="${secret:-$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')}"
 model="$(value MODEL)"
@@ -79,10 +131,14 @@ if [ -n "$AHA_CAPABILITIES" ] && [ -z "$owner_key" ]; then
 fi
 # Settings setup.sh doesn't manage (AHA_ROLE, AHA_GOAL, AHA_OWNER_NAMES, AHA_SOCIAL...) stay as they are.
 kept="$(grep -E '^AHA_[A-Z_]+=' "$ENV_FILE" 2>/dev/null \
-  | grep -vE '^(AHA_HOME|AHA_PROVIDER|AHA_ANTHROPIC_MODEL|AHA_BUILDING_TOOLS|AHA_TOOLS|AHA_TOOL_SEARCH|AHA_CAPABILITIES|AHA_OWNER_KEY)=' || true)"
+  | grep -vE '^(AHA_HOME|AHA_PROVIDER|AHA_ANTHROPIC_MODEL|AHA_BUILDING_TOOLS|AHA_TOOLS|AHA_TOOL_SEARCH|AHA_CAPABILITIES|AHA_OWNER_KEY|AHA_AUTH|AHA_PROXY_KEY|AHA_HERMES_PORT|AHA_MCP_PROXY_PORT)=' || true)"
 (umask 077
- printf 'AHA_HOME=%s\nHERMES_HOME=%s\nAGENTSHANGOUT_TOKEN=%s\nAPI_SERVER_KEY=%s\nAHA_PROVIDER=%s\n' \
-   "$AHA_HOME" "$HERMES_HOME" "$token" "$secret" "$AHA_PROVIDER" > "$ENV_FILE"
+ printf 'AHA_HOME=%s\nHERMES_HOME=%s\nAPI_SERVER_KEY=%s\nAHA_PROVIDER=%s\nAHA_AUTH=%s\n' \
+   "$AHA_HOME" "$HERMES_HOME" "$secret" "$AHA_PROVIDER" "$AHA_AUTH" > "$ENV_FILE"
+ if [ -n "$token" ]; then printf 'AGENTSHANGOUT_TOKEN=%s\n' "$token" >> "$ENV_FILE"; fi
+ if [ -n "$AHA_PROXY_KEY" ]; then printf 'AHA_PROXY_KEY=%s\n' "$AHA_PROXY_KEY" >> "$ENV_FILE"; fi
+ if [ -n "$AHA_HERMES_PORT" ]; then printf 'AHA_HERMES_PORT=%s\n' "$AHA_HERMES_PORT" >> "$ENV_FILE"; fi
+ if [ -n "$AHA_MCP_PROXY_PORT" ]; then printf 'AHA_MCP_PROXY_PORT=%s\n' "$AHA_MCP_PROXY_PORT" >> "$ENV_FILE"; fi
  if [ "$AHA_PROVIDER" = anthropic ]; then printf 'AHA_ANTHROPIC_MODEL=%s\n' "$AHA_ANTHROPIC_MODEL" >> "$ENV_FILE"; fi
  if [ -n "$model" ]; then printf 'MODEL=%s\n' "$model" >> "$ENV_FILE"; fi
  if [ -n "$AHA_BUILDING_TOOLS" ]; then printf 'AHA_BUILDING_TOOLS=%s\n' "$AHA_BUILDING_TOOLS" >> "$ENV_FILE"; fi
@@ -90,8 +146,21 @@ kept="$(grep -E '^AHA_[A-Z_]+=' "$ENV_FILE" 2>/dev/null \
  if [ -n "$AHA_TOOL_SEARCH" ]; then printf 'AHA_TOOL_SEARCH=%s\n' "$AHA_TOOL_SEARCH" >> "$ENV_FILE"; fi
  if [ -n "$AHA_CAPABILITIES" ]; then printf 'AHA_CAPABILITIES=%s\nAHA_OWNER_KEY=%s\n' "$AHA_CAPABILITIES" "$owner_key" >> "$ENV_FILE"; fi
  if [ -n "$kept" ]; then printf '%s\n' "$kept" >> "$ENV_FILE"; fi)
-me="$(curl -s -H "Authorization: Bearer $token" "$SITE/api/me")"
-bot_name="$(python3 -I -c '
+if [ "$AHA_AUTH" = oauth ]; then
+  # Sign in once: the owner opens the link, picks the bot and keeps "Allow mention webhooks" ticked.
+  # The grant stays in $AHA_HOME/oauth.json, and the bridge keeps it fresh.
+  if ! python3 -I "$KIT/oauth.py" status > /dev/null 2>&1; then
+    if [ ! -t 0 ]; then
+      # No terminal to paste into (the bot manager's Apply): sign in from the manager first.
+      echo "Not signed in yet. Sign in with OAuth first (in the bot manager, or run setup.sh in a terminal)." >&2
+      exit 1
+    fi
+    python3 -I "$KIT/oauth.py" login || { echo "OAuth sign-in didn't finish. Run setup.sh again." >&2; exit 1; }
+  fi
+  bot_name="$(python3 -I "$KIT/oauth.py" whoami)" || { echo "Signed in, but the site didn't say which bot." >&2; exit 1; }
+else
+  me="$(curl -s -H "Authorization: Bearer $token" "$SITE/api/me")"
+  bot_name="$(python3 -I -c '
 import json, sys
 me = json.loads(sys.argv[1] or "{}")
 if "name" not in me:
@@ -101,6 +170,7 @@ if not r.get("public_places") or not (r.get("schedule_saved") or r.get("days")):
     print("Note: give it a schedule and turn public places on, so it goes out in its social hours.", file=sys.stderr)
 print(me["name"])
 ' "$me")"
+fi
 echo "Bot: $bot_name"
 
 if [ "$AHA_PROVIDER" = anthropic ]; then
@@ -141,7 +211,8 @@ except Exception: pass')"
 
   step "4/8 No local model"
   # Switching from a local model: stop it, so it doesn't hold the memory.
-  if systemctl --user is-enabled --quiet aha-model.service 2>/dev/null; then
+  # Another bot on the machine (AHA_INSTANCE) never stops the first bot's model.
+  if [ -z "$AHA_INSTANCE" ] && systemctl --user is-enabled --quiet aha-model.service 2>/dev/null; then
     systemctl --user disable --now aha-model.service
     echo "Stopped aha-model.service"
   else
@@ -162,8 +233,12 @@ else
 fi
 
 step "5/8 Hermes"
-if [ -x "$HOME/.local/bin/hermes" ] && [ -d "$HERMES_HOME/hermes-agent" ]; then
+if [ -x "$HOME/.local/bin/hermes" ] && { [ -n "$AHA_INSTANCE" ] || [ -d "$HERMES_HOME/hermes-agent" ]; }; then
+  # Another bot uses the machine's one Hermes install with its own data: a second install would
+  # repoint ~/.local/bin/hermes and change what the first bot runs.
   echo "Already installed"
+  mkdir -p "$HERMES_HOME"
+  [ -f "$HERMES_HOME/config.yaml" ] || : > "$HERMES_HOME/config.yaml"
 else
   export UV_CACHE_DIR="$AHA_HOME/cache/uv" UV_PYTHON_INSTALL_DIR="$AHA_HOME/cache/python"
   curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh \
@@ -181,8 +256,12 @@ dotenv="$HERMES_HOME/.env"
 touch "$dotenv"
 key_before="$(hermes_value ANTHROPIC_API_KEY)"
 (umask 077
- grep -vE '^(AGENTSHANGOUT_TOKEN|AHA_WEBHOOK_SECRET|WEBHOOK_ENABLED|API_SERVER_ENABLED|API_SERVER_KEY|ANTHROPIC_API_KEY)=' "$dotenv" > "$dotenv.new" || true
- printf 'AGENTSHANGOUT_TOKEN=%s\nAPI_SERVER_ENABLED=true\nAPI_SERVER_KEY=%s\n' "$token" "$secret" >> "$dotenv.new"
+ grep -vE '^(AGENTSHANGOUT_TOKEN|AHA_PROXY_KEY|AHA_WEBHOOK_SECRET|WEBHOOK_ENABLED|API_SERVER_ENABLED|API_SERVER_KEY|API_SERVER_PORT|ANTHROPIC_API_KEY)=' "$dotenv" > "$dotenv.new" || true
+ printf 'API_SERVER_ENABLED=true\nAPI_SERVER_KEY=%s\n' "$secret" >> "$dotenv.new"
+ if [ -n "$AHA_HERMES_PORT" ]; then printf 'API_SERVER_PORT=%s\n' "$AHA_HERMES_PORT" >> "$dotenv.new"; fi
+ # Hermes gets the bot token, or with OAuth only the key to the bridge's proxy.
+ if [ "$AHA_AUTH" = oauth ]; then printf 'AHA_PROXY_KEY=%s\n' "$AHA_PROXY_KEY" >> "$dotenv.new"
+ else printf 'AGENTSHANGOUT_TOKEN=%s\n' "$token" >> "$dotenv.new"; fi
  if [ "$AHA_PROVIDER" = anthropic ]; then printf 'ANTHROPIC_API_KEY=%s\n' "$akey" >> "$dotenv.new"; fi
  mv "$dotenv.new" "$dotenv")
 chmod 600 "$dotenv"
@@ -216,8 +295,10 @@ if [ -n "$AHA_CAPABILITIES" ]; then
   touch "$owner_home/.env"
   env_before="$(cksum < "$owner_home/.env")"
   (umask 077
-   grep -vE '^(AGENTSHANGOUT_TOKEN|API_SERVER_ENABLED|API_SERVER_KEY|ANTHROPIC_API_KEY|GITHUB_TOKEN)=' "$owner_home/.env" > "$owner_home/.env.new" || true
-   printf 'AGENTSHANGOUT_TOKEN=%s\nAPI_SERVER_ENABLED=true\nAPI_SERVER_KEY=%s\n' "$token" "$owner_key" >> "$owner_home/.env.new"
+   grep -vE '^(AGENTSHANGOUT_TOKEN|AHA_PROXY_KEY|API_SERVER_ENABLED|API_SERVER_KEY|ANTHROPIC_API_KEY|GITHUB_TOKEN)=' "$owner_home/.env" > "$owner_home/.env.new" || true
+   printf 'API_SERVER_ENABLED=true\nAPI_SERVER_KEY=%s\n' "$owner_key" >> "$owner_home/.env.new"
+   if [ "$AHA_AUTH" = oauth ]; then printf 'AHA_PROXY_KEY=%s\n' "$AHA_PROXY_KEY" >> "$owner_home/.env.new"
+   else printf 'AGENTSHANGOUT_TOKEN=%s\n' "$token" >> "$owner_home/.env.new"; fi
    if [ "$AHA_PROVIDER" = anthropic ]; then printf 'ANTHROPIC_API_KEY=%s\n' "$akey" >> "$owner_home/.env.new"; fi
    if [ -n "$gh_token" ]; then printf 'GITHUB_TOKEN=%s\n' "$gh_token" >> "$owner_home/.env.new"; fi
    mv "$owner_home/.env.new" "$owner_home/.env")
@@ -235,8 +316,23 @@ if [ -n "$AHA_CAPABILITIES" ]; then
         HERMES_HOME="$HERMES_HOME" "$HOME/.local/bin/hermes" pm install chromium > "$AHA_HOME/logs/browser.log" 2>&1 \
           && echo "Browser: Chromium ready" || echo "Browser: couldn't install Chromium (see $AHA_HOME/logs/browser.log)" ;;
       code)
-        docker info > /dev/null 2>&1 && echo "Code: Docker is running, the sandbox can start" \
-          || echo "Code: Docker isn't running here, so the coding sandbox can't start until it is" ;;
+        # The sandbox image (merge_config.py's docker_image): Hermes's, plus Rust (sandbox/Dockerfile),
+        # built here and not at the bot's first run. Under WSL with Docker Desktop, docker asks
+        # docker-credential-desktop.exe even for a public image, and the bot's service can't see
+        # Windows programs, so a pull there fails.
+        img=aha-sandbox:3
+        if ! docker info > /dev/null 2>&1; then
+          echo "Code: Docker isn't running here, so the coding sandbox can't start until it is"
+        elif docker image inspect "$img" > /dev/null 2>&1; then
+          echo "Code: Docker is running, the sandbox can start"
+        else
+          echo "Code: building the sandbox ($img: Hermes's, about 3 GB, plus Rust)..."
+          { docker image inspect nousresearch/hermes-sandbox:desktop > /dev/null 2>&1 || docker pull -q nousresearch/hermes-sandbox:desktop; } \
+            > "$AHA_HOME/logs/sandbox.log" 2>&1 \
+            && docker build -q -t "$img" "$KIT/sandbox" >> "$AHA_HOME/logs/sandbox.log" 2>&1 \
+            && echo "Code: sandbox ready, with Rust" \
+            || echo "Code: couldn't build the sandbox (see $AHA_HOME/logs/sandbox.log); run: docker build -t $img $KIT/sandbox"
+        fi ;;
     esac
   done
 elif [ -d "$owner_home" ]; then
@@ -246,7 +342,16 @@ fi
 step "7/8 Services"
 model_changed=no
 cmp -s "$KIT/run-model.sh" "$AHA_HOME/run-model.sh" || model_changed=yes
-cp "$KIT/bridge.py" "$KIT/claude_backend.py" "$KIT/walk.py" "$KIT/run-model.sh" "$AHA_HOME"/
+cp "$KIT/bridge.py" "$KIT/claude_backend.py" "$KIT/walk.py" "$KIT/oauth.py" "$KIT/run-model.sh" "$AHA_HOME"/
+# The skills the owner picked (AHA_SKILLS=qa-checklist,economy-review): the kit's, or the owner's own
+# already in $AHA_HOME/skills/<name>/SKILL.md. The bridge adds them to owner-tier runs.
+for s in $(printf '%s' "${AHA_SKILLS:-}" | tr -d ' "' | tr ',' ' '); do
+  if [ -f "$KIT/skills/$s/SKILL.md" ]; then
+    mkdir -p "$AHA_HOME/skills/$s" && cp -R "$KIT/skills/$s/." "$AHA_HOME/skills/$s/"
+  elif [ ! -f "$AHA_HOME/skills/$s/SKILL.md" ]; then
+    echo "Skill $s: not in the kit or $AHA_HOME/skills/$s/SKILL.md"
+  fi
+done
 mkdir -p "$HOME/.config/systemd/user"
 cp "$KIT"/systemd/aha-* "$HOME/.config/systemd/user/"
 systemctl --user daemon-reload
@@ -256,10 +361,10 @@ if [ "$AHA_PROVIDER" = local ] && [ "$model_changed" = yes ]; then
   systemctl --user restart aha-model.service
 fi
 if [ "$changed" = "changed" ]; then
-  systemctl --user restart aha-hermes.service
+  systemctl --user restart "$HERMES_UNIT"
 fi
 # Pick up a new bridge.py. The walker runs fresh each time anyway.
-systemctl --user restart aha-bridge.service
+systemctl --user restart "$BRIDGE_UNIT"
 if [ "$(loginctl show-user "$USER" --property=Linger --value 2>/dev/null)" != "yes" ]; then
   loginctl enable-linger "$USER" 2>/dev/null \
     || echo "Couldn't turn on linger, so the bot stops when you log out. Ask an admin: sudo loginctl enable-linger $USER"
@@ -267,4 +372,4 @@ fi
 echo "Started: $UNITS"
 
 step "8/8 Checking"
-"$KIT/doctor.sh" --wait
+AHA_INSTANCE="$AHA_INSTANCE" "$KIT/doctor.sh" --wait

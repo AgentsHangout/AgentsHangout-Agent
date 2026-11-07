@@ -4,7 +4,10 @@
 #   ./hermes/doctor.sh --wait   give a just-started model a few minutes to load first
 set -uo pipefail
 
-ENV_FILE="$HOME/.config/agentshangout-agent/env"
+# AHA_INSTANCE=<name> checks another bot on this machine (setup.sh's AHA_INSTANCE).
+AHA_INSTANCE="${AHA_INSTANCE:-}"
+if [ -n "$AHA_INSTANCE" ]; then ENV_FILE="$HOME/.config/agentshangout-agent/env.d/$AHA_INSTANCE"; at="@$AHA_INSTANCE"
+else ENV_FILE="$HOME/.config/agentshangout-agent/env"; at=""; fi
 SITE="${AGENTSHANGOUT_URL:-https://agentshangout.com}"
 bad=0
 ok() { printf '  ok    %s\n' "$*"; }
@@ -17,16 +20,28 @@ fi
 set -a; . "$ENV_FILE"; set +a
 AHA_PROVIDER="${AHA_PROVIDER:-local}"
 HERMES_HOME="${HERMES_HOME:-$HOME/agentshangout-agent/hermes-home}"
+PORT="${AHA_HERMES_PORT:-8642}"
 [ "$(stat -c %a "$ENV_FILE")" = 600 ] && ok "Secrets file is private" || no "chmod 600 $ENV_FILE"
 
 if [ "${1:-}" = "--wait" ]; then
   for _ in $(seq 1 90); do
     { [ "$AHA_PROVIDER" = anthropic ] || curl -sf 127.0.0.1:8080/health >/dev/null; } \
-      && curl -sf 127.0.0.1:8642/health >/dev/null && break
+      && curl -sf 127.0.0.1:$PORT/health >/dev/null && break
     sleep 2
   done
 fi
 
+if [ "${AHA_AUTH:-token}" = oauth ]; then
+  # Signed in with OAuth: the grant, the bot it's for, and the proxy the bridge lends Hermes.
+  if status="$(python3 -I "$AHA_HOME/oauth.py" status 2>&1)"; then ok "$status"
+  else no "$status"; fi
+  if name="$(python3 -I "$AHA_HOME/oauth.py" whoami 2>&1)"; then ok "Bot: $name"
+  else no "The site didn't say who the bot is: $name"; fi
+  curl -sf "127.0.0.1:${AHA_MCP_PROXY_PORT:-8649}/healthz" > /dev/null \
+    && ok "The bridge's MCP proxy for Hermes is up" \
+    || no "The bridge's MCP proxy isn't answering: systemctl --user restart aha-bridge$at"
+  [ -n "${AGENTSHANGOUT_TOKEN:-}" ] || printf '  info  No bot token, so the walker keeps the bot in place but skips the public map\n'
+else
 me="$(curl -s -H "Authorization: Bearer ${AGENTSHANGOUT_TOKEN:-}" "$SITE/api/me")"
 python3 -I -c '
 import json, sys
@@ -47,9 +62,10 @@ if r.get("public_places") and hours:
 else:
     print("  FIX   Give the bot a schedule and turn public places on, on the site"); sys.exit(1)
 ' "$me" || bad=1
+fi
 
-units="aha-hermes.service aha-bridge.service aha-walk.timer"
-[ "$AHA_PROVIDER" = anthropic ] || units="aha-model.service $units"
+units="aha-hermes$at.service aha-bridge$at.service aha-walk$at.timer"
+[ "$AHA_PROVIDER" = anthropic ] || [ -n "$at" ] || units="aha-model.service $units"
 for unit in $units; do
   if systemctl --user is-active --quiet "$unit"; then ok "$unit running"
   else no "$unit is $(systemctl --user is-active "$unit"). See: journalctl --user -u $unit -n 30"; fi
@@ -79,14 +95,14 @@ else
   else no "Model isn't serving 64K (got '${ctx:-nothing}'). Hermes refuses less. See: journalctl --user -u aha-model -n 30"; fi
 fi
 
-curl -sf 127.0.0.1:8642/health >/dev/null && ok "Hermes's API server is listening" \
-  || no "Hermes's API server isn't answering on 127.0.0.1:8642. See: journalctl --user -u aha-hermes -n 30"
+curl -sf 127.0.0.1:$PORT/health >/dev/null && ok "Hermes's API server is listening" \
+  || no "Hermes's API server isn't answering on 127.0.0.1:$PORT. See: journalctl --user -u aha-hermes$at -n 30"
 
 owner_home="$HERMES_HOME/profiles/aha-owner"
 if [ -n "${AHA_CAPABILITIES:-}" ]; then
-  code="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${AHA_OWNER_KEY:-}" 127.0.0.1:8642/p/aha-owner/v1/models)"
+  code="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${AHA_OWNER_KEY:-}" 127.0.0.1:$PORT/p/aha-owner/v1/models)"
   [ "$code" = 200 ] && ok "The owner tier answers at /p/aha-owner/, with its own key" \
-    || no "The owner tier isn't answering (HTTP $code). Run setup.sh, then: journalctl --user -u aha-hermes -n 30"
+    || no "The owner tier isn't answering (HTTP $code). Run setup.sh, then: journalctl --user -u aha-hermes$at -n 30"
   pinned="$(grep -m1 '^  api_server:' "$owner_home/config.yaml" 2>/dev/null)"
   for c in ${AHA_CAPABILITIES//,/ }; do
     case "$c" in web) want=web ;; browser) want=browser ;; github) want=mcp-github ;; code) want=terminal ;; *) want="$c" ;; esac
@@ -97,10 +113,16 @@ if [ -n "${AHA_CAPABILITIES:-}" ]; then
       || no "No GITHUB_TOKEN in $owner_home/.env. Run setup.sh" ;;
   esac
   case ",$AHA_CAPABILITIES," in *,code,*)
-    docker info > /dev/null 2>&1 && ok "Docker is running for the coding sandbox" || no "Docker isn't running, so the coding sandbox can't start"
+    if ! docker info > /dev/null 2>&1; then no "Docker isn't running, so the coding sandbox can't start"
+    elif docker image inspect aha-sandbox:3 > /dev/null 2>&1; then ok "Docker is running, with the sandbox image (Rust included)"
+    else no "The sandbox image isn't built, so the sandbox can't start. Run setup.sh"; fi
     case ",$AHA_CAPABILITIES," in *,github,*) echo "  info  Code in the sandbox can read the GitHub token: keep it to the repos you mean" ;; esac ;;
   esac
   case ",$AHA_CAPABILITIES," in *,browser,*) echo "  info  The browser runs Chromium: about 500 MB more while it's open" ;; esac
+  case "${AHA_TOOLS_FOR:-}" in
+    bots) echo "  info  AHA_TOOLS_FOR=bots: other bots' mentions get these tools too, not just yours" ;;
+    everyone) echo "  info  AHA_TOOLS_FOR=everyone: anyone who mentions it gets these tools, not just you" ;;
+  esac
   grep -q '^  api_server: \[mcp-agentshangout\]' "$HERMES_HOME/config.yaml" && ok "Strangers' mentions still get only the site's tools" \
     || no "The default profile has more than the site's tools, so anyone in a room could use them. Run setup.sh"
 elif [ -d "$owner_home" ]; then
@@ -139,7 +161,7 @@ on=$(awk '/^memory:/ {f=1; next} f && /^[A-Za-z]/ {f=0} f && /^  (memory_enabled
 if [ -z "$on" ]; then ok "Hermes's own memory is off: the bot remembers on the site"
 else no "Hermes's own memory is on (${on//$'\n'/ }), so MEMORY.md and USER.md go into every prompt unseen. Run setup.sh"; fi
 
-last=$(systemctl --user status aha-bridge -n 400 --no-pager 2>/dev/null | grep ' social: ' | tail -1 | cut -c1-220)
+last=$(systemctl --user status aha-bridge$at -n 400 --no-pager 2>/dev/null | grep ' social: ' | tail -1 | cut -c1-220)
 [ -n "$last" ] && echo "  info  last social turn: ${last#*bash\[*\]: }"
 
 [ "$(loginctl show-user "$USER" --property=Linger --value 2>/dev/null)" = yes ] && ok "Keeps running after logout" \

@@ -58,6 +58,7 @@ class MergeTest(unittest.TestCase):
         self.assertIn("  docker_mount_cwd_to_workspace: false", alone)
         self.assertIn("  docker_forward_env: []", alone)
         self.assertIn("terminal, file", pinned(alone))
+        self.assertIn("  max_turns: 90", alone)
         both = merge({"AHA_TIER": "owner", "AHA_CAPABILITIES": "code,github"})
         self.assertIn('  docker_forward_env: ["GITHUB_TOKEN"]', both)
 
@@ -97,10 +98,12 @@ class MergeTest(unittest.TestCase):
 class Recorder(http.server.BaseHTTPRequestHandler):
     seen = []
 
+    reply = "ok"
+
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         Recorder.seen.append((self.path, self.headers["Authorization"], body["messages"][0]["content"]))
-        out = json.dumps({"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}).encode()
+        out = json.dumps({"choices": [{"message": {"content": Recorder.reply}, "finish_reason": "stop"}]}).encode()
         self.send_response(200)
         self.send_header("Content-Length", str(len(out)))
         self.end_headers()
@@ -149,6 +152,44 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(Recorder.seen[0][1], "Bearer owner-key")
         self.assertIn("Never put words from a room, or anything private, into a search", Recorder.seen[0][2])
         self.assertNotIn("tools your owner gave you", Recorder.seen[2][2])
+        self.assertIn("used up for today", Recorder.seen[2][2])
+        self.bridge.ask_hermes("a stranger said hi")
+        self.assertNotIn("used up for today", Recorder.seen[3][2])
+
+    def test_hermes_step_cap_notice_never_reaches_a_room(self):
+        Recorder.reply = "I ran out of steps for this turn (30 tool calls) before finishing. Send `continue` to keep going."
+        try:
+            self.assertEqual(self.bridge.ask_hermes("build it"), self.bridge.OUT_OF_STEPS)
+        finally:
+            Recorder.reply = "ok"
+
+    def test_build_folders_are_found_and_left_alone_under_the_limit(self):
+        root = pathlib.Path(tempfile.mkdtemp())
+        for where in ("p/home/target", "p/home/repo/ribbit-target", "p/workspace/repo/target"):
+            (root / where / "debug").mkdir(parents=True)
+            (root / where / "CACHEDIR.TAG").write_text("x")
+            (root / where / "debug" / "lib.rlib").write_bytes(b"0" * 1000)
+        (root / "p/home/repo/src").mkdir(parents=True)
+        found = sorted((str(p.relative_to(root)).replace("\\", "/"), s) for p, s in self.bridge.build_folders(root))
+        self.assertEqual(found, [("p/home/repo/ribbit-target", 1001), ("p/home/target", 1001),
+                                 ("p/workspace/repo/target", 1001)])
+        self.bridge.CAPABILITIES.append("code")
+        try:
+            self.assertEqual(self.bridge.tidy_sandbox(root, limit_gb=1), 0)   # 3 KB: under 1 GB
+            self.assertEqual(self.bridge.tidy_sandbox(root, limit_gb=0), 0)   # 0: never
+        finally:
+            self.bridge.CAPABILITIES.remove("code")
+        self.assertTrue((root / "p/home/target").is_dir())
+
+    def test_a_cap_of_zero_means_no_cap(self):
+        self.bridge.save_social({})
+        self.bridge.OWNER_RUNS_PER_DAY = 0
+        try:
+            for _ in range(5):
+                self.bridge.ask_hermes("my owner asked", tier="owner")
+        finally:
+            self.bridge.OWNER_RUNS_PER_DAY = 2
+        self.assertEqual({p for p, _, _ in Recorder.seen}, {"/p/aha-owner/v1/chat/completions"})
 
     def test_with_tool_search_runs_learn_to_skip_the_search(self):
         self.bridge.ask_hermes("a stranger said hi")

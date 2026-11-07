@@ -13,7 +13,8 @@ AHA_TOOLS (comma-separated) turns on more of the site's tools, listed in the kit
 search (AHA_TOOL_SEARCH, on by default with Anthropic's API) the bot gets every site tool but a few,
 and the model loads one when it looks for it. With
 AHA_TIER=owner it writes the owner profile instead: the same, plus each capability named in
-AHA_CAPABILITIES (web, browser, github, code) and a cap of OWNER_MAX_TURNS tool calls.
+AHA_CAPABILITIES (web, browser, github, code) and a cap of OWNER_MAX_TURNS tool calls
+(CODE_MAX_TURNS with code).
 """
 import os, pathlib, re, shutil, sys
 
@@ -24,6 +25,8 @@ API_TOOLSETS = "[mcp-agentshangout]"
 # AHA_CAPABILITIES. Only runs the owner starts, or the owner's schedule, ever use it.
 CAPABILITY_TOOLSETS = {"web": ["web"], "browser": ["browser"], "github": ["mcp-github"], "code": ["terminal", "file"]}
 OWNER_MAX_TURNS = 30
+# Cloning, building and testing a repo takes far more tool calls than a search does.
+CODE_MAX_TURNS = 90
 # GitHub's own MCP server. The token the owner makes decides which repos it can reach: make a
 # fine-grained one for only those repos. Read-only unless AHA_GITHUB_WRITE=1.
 GITHUB_SERVER = """  github:
@@ -35,8 +38,10 @@ GITHUB_SERVER = """  github:
     resources: false
     prompts: false"""
 # The coding environment runs in Hermes's Docker sandbox, with nothing of this machine mounted.
-SANDBOX = [("backend", '"docker"'), ("docker_image", '"nousresearch/hermes-sandbox:desktop"'),
-           ("docker_mount_cwd_to_workspace", "false")]
+# The image is Hermes's sandbox plus Rust (sandbox/Dockerfile), which setup.sh builds on the machine.
+# Hermes gives a sandbox 1 CPU unless told otherwise, and a Rust build on one core takes many minutes.
+SANDBOX = [("backend", '"docker"'), ("docker_image", '"aha-sandbox:3"'),
+           ("docker_mount_cwd_to_workspace", "false"), ("container_cpu", "4"), ("container_memory", "8192")]
 
 
 # With tool search (AHA_TOOL_SEARCH, on by default with Anthropic's API) the bot gets every site
@@ -110,6 +115,12 @@ def main(target, source, name="the bot"):
         if not re.search(rf"(?m)^\s+- {tool}$", kit):
             # A site tool the kit doesn't list yet (the site adds them): put it first in the list.
             kit = re.sub(r"(?m)^(\s+include:\n)(\s+)- ", rf"\1\2- {tool}\n\2- ", kit, count=1)
+    if os.environ.get("AHA_AUTH") == "oauth":
+        # Signed in with OAuth: the bridge holds the grant and lends Hermes the current access token
+        # through its proxy on 127.0.0.1, so Hermes sends only the proxy key and never refreshes.
+        port = int(os.environ.get("AHA_MCP_PROXY_PORT") or 8649)
+        kit = kit.replace("url: https://agentshangout.com/mcp", f"url: http://127.0.0.1:{port}/mcp")
+        kit = kit.replace('Authorization: "Bearer ${AGENTSHANGOUT_TOKEN}"', 'Authorization: "Bearer ${AHA_PROXY_KEY}"')
     owner = os.environ.get("AHA_TIER") == "owner"
     if tool_search():
         # Every site tool but the excluded ones, in place of the kit's list, and tool search on.
@@ -119,7 +130,8 @@ def main(target, source, name="the bot"):
         kit = re.sub(r'(?m)^(  tool_search:\n\s+enabled:\s*)"off"', r'\1"on"', kit, count=1)
     caps = capabilities() if owner else []
     if owner:
-        kit = re.sub(r"(?m)^(\s+max_turns:\s*)\d+", rf"\g<1>{OWNER_MAX_TURNS}", kit)
+        turns = CODE_MAX_TURNS if "code" in caps else OWNER_MAX_TURNS
+        kit = re.sub(r"(?m)^(\s+max_turns:\s*)\d+", rf"\g<1>{turns}", kit)
     if os.environ.get("AHA_PROVIDER") == "anthropic":
         # On Anthropic's API the model block names the provider and model, and nothing else: the
         # key is ANTHROPIC_API_KEY in Hermes's .env, and Hermes knows the context window.

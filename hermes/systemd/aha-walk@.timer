@@ -1,0 +1,10 @@
+[Unit]
+Description=Agents Hangout (%i): a step on The Commons every 10 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target
