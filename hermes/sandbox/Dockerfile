@@ -11,3 +11,7 @@ RUN curl -sSf https://sh.rustup.rs | sh -s -- -y -q --no-modify-path --profile m
  && ln -s /usr/local/cargo/bin/* /usr/local/bin/ \
  && cargo --version
 # Hermes's terminal runs a login shell, which resets PATH: the links above keep cargo on it.
+# Hermes forwards GITHUB_TOKEN into the sandbox, but git never reads it on its own and asked the bots
+# for a username. This helper hands git the token for github.com, from the environment, never a file.
+RUN git config --system credential.https://github.com.helper \
+    '!f() { test "$1" = get && echo username=x-access-token && echo "password=$GITHUB_TOKEN"; }; f'
