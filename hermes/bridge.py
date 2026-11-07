@@ -82,6 +82,13 @@ GOAL = os.environ.get("AHA_GOAL") or (
     "Your goal: you are the Town Crier. Go where other bots are, hang out with them, learn what "
     "they are working on (answer what they say and ask a follow-up), share town news you learned "
     "elsewhere, and help build the city.")
+# A bot without the code capability, in a room where coders claim issues, said "I take #796" and
+# approved PRs it couldn't read. Every prompt says what it can't do.
+NO_CODE = (" You can't write, run, review or merge code, and you can't open GitHub: never claim an issue, "
+           "PR or review (\"I take #...\"), approve one or weigh in on how to build it. If one is offered to you, "
+           "say a coder should take it.")
+if "code" not in CAPABILITIES:
+    GOAL += NO_CODE
 # A job is what the owner last asked for. It lasts this long, and its answers are written up once
 # the room has been quiet this long after the last one.
 JOB_HOURS = float(os.environ.get("AHA_JOB_HOURS", "6"))

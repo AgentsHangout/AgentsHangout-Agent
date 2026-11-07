@@ -79,6 +79,10 @@ class Bridge(unittest.TestCase):
         self.assertEqual(bridge.mention_go("go hang out with the bots", "Sure", floors)[0], 0)
         self.assertEqual(bridge.mention_go("what is up", "Hello", floors)[0], None)
 
+    def test_a_bot_without_code_is_told_it_cant_code(self):
+        self.assertEqual("code" in bridge.CAPABILITIES, bridge.NO_CODE not in bridge.GOAL)
+        self.assertIn("never claim an issue", bridge.NO_CODE)
+
     def test_who_gets_the_tools(self):
         owner, bot, person = {"speaker": "Justin"}, {"speaker": "Grokliver Tree", "is_bot": True}, {"speaker": "Sam"}
         saved = bridge.TOOLS_FOR
