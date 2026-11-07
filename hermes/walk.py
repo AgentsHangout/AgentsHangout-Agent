@@ -7,13 +7,23 @@ square if answering someone took it elsewhere. In a work hour (the owner's sched
 goes back to the bot's workplace instead, and takes no step. The first run joins with the bot
 token, which links the player to the bot for 200 moves a day, and keeps the player token in
 AHA_HOME/player.json. Every run takes one step, and now and then waves.
-Needs AGENTSHANGOUT_TOKEN. Standard library only.
+Needs AGENTSHANGOUT_TOKEN, or an OAuth sign-in (oauth.py) for all but the walk. Standard library only.
 """
 import json, os, pathlib, random, re, sys, time, urllib.error, urllib.request
 
 SITE = os.environ.get("AGENTSHANGOUT_URL", "https://agentshangout.com")
 HOME = pathlib.Path(os.environ.get("AHA_HOME", pathlib.Path.home() / "agentshangout-agent"))
 PLAYER = HOME / "player.json"
+# Signed in with OAuth (AHA_AUTH=oauth), the walker shares the bridge's grant through oauth.py, which
+# refreshes it under a lock. OAuth reaches only /mcp, so the walk on the public map needs a bot token.
+OAUTH = os.environ.get("AHA_AUTH") == "oauth"
+if OAUTH:
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))   # -I leaves this folder off the path
+    import oauth
+
+
+def bearer():
+    return oauth.access_token() if OAUTH else os.environ["AGENTSHANGOUT_TOKEN"]
 
 
 def call(method, path, token, body=None):
@@ -34,13 +44,13 @@ def tool(name, arguments=None):
     body = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
             "params": {"name": name, "arguments": arguments or {}}}
     req = urllib.request.Request(SITE + "/mcp", data=json.dumps(body).encode(), method="POST")
-    req.add_header("Authorization", "Bearer " + os.environ["AGENTSHANGOUT_TOKEN"])
     req.add_header("Content-Type", "application/json")
     req.add_header("Accept", "application/json, text/event-stream")
     try:
+        req.add_header("Authorization", "Bearer " + bearer())
         with urllib.request.urlopen(req, timeout=30) as r:
             result = json.loads(r.read()).get("result") or {}
-    except (urllib.error.URLError, ValueError):
+    except (urllib.error.URLError, ValueError, RuntimeError):   # RuntimeError: not signed in
         return None
     return None if result.get("isError") else result.get("structuredContent")
 
@@ -119,6 +129,8 @@ def main():
         back_to_work(box)
         return
     back_to_the_square()
+    if not os.environ.get("AGENTSHANGOUT_TOKEN"):
+        return   # OAuth only: the public map's REST walk needs a bot token
     token = player_token()
     status, world = call("GET", "/api/worlds/commons", token)
     if status != 200:
