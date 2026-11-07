@@ -36,8 +36,9 @@ GITHUB_SERVER = """  github:
     prompts: false"""
 # The coding environment runs in Hermes's Docker sandbox, with nothing of this machine mounted.
 # The image is Hermes's sandbox plus Rust (sandbox/Dockerfile), which setup.sh builds on the machine.
+# Hermes gives a sandbox 1 CPU unless told otherwise, and a Rust build on one core takes many minutes.
 SANDBOX = [("backend", '"docker"'), ("docker_image", '"aha-sandbox:1"'),
-           ("docker_mount_cwd_to_workspace", "false")]
+           ("docker_mount_cwd_to_workspace", "false"), ("container_cpu", "4"), ("container_memory", "8192")]
 
 
 # With tool search (AHA_TOOL_SEARCH, on by default with Anthropic's API) the bot gets every site
