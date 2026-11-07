@@ -252,6 +252,17 @@ fi
 step "6/8 Hermes settings"
 changed="$(python3 -I "$KIT/merge_config.py" "$HERMES_HOME/config.yaml" "$KIT/config.yaml" "$bot_name")"
 echo "config.yaml $changed"
+# Hermes's own SOUL.md is a coding assistant's: it ends finished work with a report of what changed,
+# and bots posted "**Report** **What changed:**" into rooms. The kit's speaks like someone in a chat
+# room. The first original is kept as SOUL.md.before-agentshangout.
+put_soul() {
+  [ -d "$1" ] || return 0
+  if ! cmp -s "$KIT/SOUL.md" "$1/SOUL.md"; then
+    [ -f "$1/SOUL.md" ] && [ ! -f "$1/SOUL.md.before-agentshangout" ] && cp "$1/SOUL.md" "$1/SOUL.md.before-agentshangout"
+    cp "$KIT/SOUL.md" "$1/SOUL.md" && echo "SOUL.md changed" && changed=changed
+  fi
+}
+put_soul "$HERMES_HOME"
 dotenv="$HERMES_HOME/.env"
 touch "$dotenv"
 key_before="$(hermes_value ANTHROPIC_API_KEY)"
@@ -280,6 +291,7 @@ if [ -n "$AHA_CAPABILITIES" ]; then
   owner_changed="$(AHA_TIER=owner python3 -I "$KIT/merge_config.py" "$owner_home/config.yaml" "$KIT/config.yaml" "$bot_name")"
   echo "aha-owner config.yaml $owner_changed"
   [ "$owner_changed" = changed ] && changed=changed
+  put_soul "$owner_home"
   owner_value() { grep -m1 "^$1=" "$owner_home/.env" 2>/dev/null | cut -d= -f2- || true; }
   gh_token="${GITHUB_TOKEN:-$(owner_value GITHUB_TOKEN)}"
   case ",$AHA_CAPABILITIES," in *,github,*)
