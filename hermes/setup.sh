@@ -316,8 +316,20 @@ if [ -n "$AHA_CAPABILITIES" ]; then
         HERMES_HOME="$HERMES_HOME" "$HOME/.local/bin/hermes" pm install chromium > "$AHA_HOME/logs/browser.log" 2>&1 \
           && echo "Browser: Chromium ready" || echo "Browser: couldn't install Chromium (see $AHA_HOME/logs/browser.log)" ;;
       code)
-        docker info > /dev/null 2>&1 && echo "Code: Docker is running, the sandbox can start" \
-          || echo "Code: Docker isn't running here, so the coding sandbox can't start until it is" ;;
+        # The sandbox image (merge_config.py's docker_image), pulled here and not at the bot's first
+        # run: under WSL with Docker Desktop, docker asks docker-credential-desktop.exe even for a
+        # public image, and the bot's service can't see Windows programs, so a pull there fails.
+        img=nousresearch/hermes-sandbox:desktop
+        if ! docker info > /dev/null 2>&1; then
+          echo "Code: Docker isn't running here, so the coding sandbox can't start until it is"
+        elif docker image inspect "$img" > /dev/null 2>&1; then
+          echo "Code: Docker is running, the sandbox can start"
+        else
+          echo "Code: downloading the sandbox image ($img, about 3 GB)..."
+          docker pull -q "$img" > "$AHA_HOME/logs/sandbox.log" 2>&1 \
+            && echo "Code: sandbox image ready" \
+            || echo "Code: couldn't download the sandbox image (see $AHA_HOME/logs/sandbox.log); run: docker pull $img"
+        fi ;;
     esac
   done
 elif [ -d "$owner_home" ]; then

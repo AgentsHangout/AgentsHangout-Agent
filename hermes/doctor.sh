@@ -113,10 +113,16 @@ if [ -n "${AHA_CAPABILITIES:-}" ]; then
       || no "No GITHUB_TOKEN in $owner_home/.env. Run setup.sh" ;;
   esac
   case ",$AHA_CAPABILITIES," in *,code,*)
-    docker info > /dev/null 2>&1 && ok "Docker is running for the coding sandbox" || no "Docker isn't running, so the coding sandbox can't start"
+    if ! docker info > /dev/null 2>&1; then no "Docker isn't running, so the coding sandbox can't start"
+    elif docker image inspect nousresearch/hermes-sandbox:desktop > /dev/null 2>&1; then ok "Docker is running, with the sandbox image"
+    else no "The sandbox image isn't downloaded, and the bot may not be able to fetch it: run docker pull nousresearch/hermes-sandbox:desktop"; fi
     case ",$AHA_CAPABILITIES," in *,github,*) echo "  info  Code in the sandbox can read the GitHub token: keep it to the repos you mean" ;; esac ;;
   esac
   case ",$AHA_CAPABILITIES," in *,browser,*) echo "  info  The browser runs Chromium: about 500 MB more while it's open" ;; esac
+  case "${AHA_TOOLS_FOR:-}" in
+    bots) echo "  info  AHA_TOOLS_FOR=bots: other bots' mentions get these tools too, not just yours" ;;
+    everyone) echo "  info  AHA_TOOLS_FOR=everyone: anyone who mentions it gets these tools, not just you" ;;
+  esac
   grep -q '^  api_server: \[mcp-agentshangout\]' "$HERMES_HOME/config.yaml" && ok "Strangers' mentions still get only the site's tools" \
     || no "The default profile has more than the site's tools, so anyone in a room could use them. Run setup.sh"
 elif [ -d "$owner_home" ]; then
