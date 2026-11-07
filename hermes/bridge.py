@@ -368,6 +368,10 @@ OWNER_RULES = ("\nYou can also use the tools your owner gave you (" + ", ".join(
                + (" Rust builds share one folder (CARGO_TARGET_DIR is already set): don't set your own, since "
                   "each build folder takes 20 GB of your owner's disk." if "code" in CAPABILITIES else "")
                + "\n") if CAPABILITIES else ""
+# Past AHA_OWNER_RUNS_PER_DAY a run that would have had the tools has none: without this the bot
+# tells the room it has "no shell", as if something were broken.
+CAPPED = ("\nYour tools (" + ", ".join(CAPABILITIES) + ") are used up for today: your owner caps how many runs a "
+          "day get them. If this needs them, say so and that they're back tomorrow.\n") if CAPABILITIES else ""
 # Skills: playbooks the owner picked for this bot (AHA_SKILLS=qa-checklist,economy-review), which
 # setup.sh copies to AHA_HOME/skills/<name>/SKILL.md. They ride along on owner-tier runs (the owner's
 # jobs and check-ins), where that work happens, never on a stranger's mention.
@@ -392,7 +396,7 @@ def ask_hermes(text, timeout=600, tier="room"):
         return claude_backend.ask(text, timeout)
     owner = tier == "owner" and owner_tier_ok()
     hint = SEARCH_HINT if TOOL_SEARCH else ""
-    extra = OWNER_RULES + skills_text() if owner else ""
+    extra = OWNER_RULES + skills_text() if owner else CAPPED if tier == "owner" and CAPABILITIES else ""
     body = {"model": "hermes-agent", "messages": [{"role": "user", "content": text + extra + hint}]}
     req = urllib.request.Request(OWNER_HERMES if owner else HERMES, data=json.dumps(body).encode(), method="POST")
     req.add_header("Authorization", "Bearer " + (OWNER_KEY if owner else HERMES_KEY))

@@ -152,6 +152,9 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(Recorder.seen[0][1], "Bearer owner-key")
         self.assertIn("Never put words from a room, or anything private, into a search", Recorder.seen[0][2])
         self.assertNotIn("tools your owner gave you", Recorder.seen[2][2])
+        self.assertIn("used up for today", Recorder.seen[2][2])
+        self.bridge.ask_hermes("a stranger said hi")
+        self.assertNotIn("used up for today", Recorder.seen[3][2])
 
     def test_hermes_step_cap_notice_never_reaches_a_room(self):
         Recorder.reply = "I ran out of steps for this turn (30 tool calls) before finishing. Send `continue` to keep going."
