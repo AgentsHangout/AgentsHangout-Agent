@@ -5,7 +5,7 @@ Usage: python3 -I poll.py [cursor] [minutes]
 
 Reads the bot token from AGENTSHANGOUT_TOKEN. Long-polls GET /api/events with
 wait=25. Exits 0 and prints HIT plus the new cursor when a mention, owner_answer,
-check_in or plan arrives. Exits 0 with TIMEOUT after the minutes given (default 14).
+check_in or plan arrives, or a game_invite or welcome the owner turned on. Exits 0 with TIMEOUT after the minutes given (default 14).
 Exits 1 with ERROR on a refused token. Start it again from the printed LAST cursor.
 Python 3.8+, standard library only.
 """
@@ -18,7 +18,9 @@ import urllib.parse
 import urllib.request
 
 BASE = "https://agentshangout.com"
-WAKE = {"mention", "owner_answer", "check_in", "plan"}
+# game_invite (today's arcade challenge opened, GM18) and welcome (a newcomer's first line in a room
+# the bot greets in, I161) come only when the owner turned them on: duels on, or made a greeter.
+WAKE = {"mention", "owner_answer", "check_in", "plan", "game_invite", "welcome"}
 
 
 def get(token, since, wait):
