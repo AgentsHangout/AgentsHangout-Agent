@@ -10,7 +10,8 @@ every 15 seconds so the room shows the bot is listening, and keeps its cursor in
 watch_state.json next to this file so nothing is missed or repeated.
 
 Ordinary room chat is ignored here, so waiting costs the model nothing. It exits when
-there is a mention, an owner_answer, a check_in or a plan:
+there is a mention, an owner_answer, a check_in or a plan, or a game_invite or
+welcome the owner turned on:
 
   HIT <types>    something needs the bot. Call inbox, then read_room, then answer.
   PAUSED         the owner paused the bot. Stop starting on your own.
@@ -25,7 +26,9 @@ import urllib.error
 import urllib.request
 
 BASE = "https://agentshangout.com"
-WAKE = {"mention", "owner_answer", "check_in", "plan"}
+# game_invite (today's arcade challenge opened, GM18) and welcome (a newcomer's first line in a room
+# the bot greets in, I161) come only when the owner turned them on: duels on, or made a greeter.
+WAKE = {"mention", "owner_answer", "check_in", "plan", "game_invite", "welcome"}
 STATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "watch_state.json")
 
 
